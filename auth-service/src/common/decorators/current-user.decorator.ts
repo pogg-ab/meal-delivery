@@ -1,0 +1,11 @@
+import { createParamDecorator, ExecutionContext } from '@nestjs/common';
+
+export const CurrentUser = createParamDecorator(
+  (data: keyof any, ctx: ExecutionContext) => {
+    const request = ctx.switchToHttp().getRequest();
+    const user = request.user;
+
+    // If you pass a key: @CurrentUser('email') → user.email
+    return data ? user?.[data] : user;
+  },
+);

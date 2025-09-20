@@ -3,9 +3,14 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
-import { APP_GUARD } from '@nestjs/core';
-import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
-import { PermissionsGuard } from './common/guards/permissions.guard';
+import { AuthModule } from './modules/AuthModule/auth.module';
+import { RolesModule } from './modules/RolesModule/roles.module';
+import { PermissionsModule } from './modules/PermissionModule/permission.module';
+import { AuditModule } from './modules/AuditModule/audit.module';
+import { UsersModule } from './modules/UserModule/user.module';
+import { KafkaProvider } from './providers/kafka.provider';
+import { MailerProvider } from './providers/mailer.provider';
+
 
 @Module({
   imports: [
@@ -32,6 +37,13 @@ import { PermissionsGuard } from './common/guards/permissions.guard';
         migrations: [__dirname + '/migrations/*{.ts,.js}'],
       }),
     }),
+    AuthModule,
+    RolesModule,
+    PermissionsModule,
+    AuditModule,
+    UsersModule
   ],
+  providers: [KafkaProvider, MailerProvider],
+  exports: [KafkaProvider, MailerProvider],
 })
 export class AppModule {}

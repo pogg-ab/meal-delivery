@@ -1,0 +1,30 @@
+import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { JwtModule } from '@nestjs/jwt';
+import { PassportModule } from '@nestjs/passport';
+import { AuthService } from './auth.service';
+import { AuthController } from './auth.controller';
+import { JwtStrategy } from './strategies/jwt.strategy';
+import { User } from '../../entities/User.entity';
+import { RefreshToken } from '../../entities/Refresh-token.entity';
+import { OtpVerification } from '../../entities/Otp-verification.entity';
+import { RolesModule } from '../RolesModule/roles.module';
+import { KafkaProvider } from '../../providers/kafka.provider';
+import { MailerProvider } from '../../providers/mailer.provider';
+
+
+@Module({
+imports: [
+TypeOrmModule.forFeature([User, RefreshToken, OtpVerification]),
+PassportModule.register({ defaultStrategy: 'jwt' }),
+JwtModule.register({
+secret: process.env.JWT_SECRET || 'supersecret',
+signOptions: { expiresIn: process.env.JWT_EXPIRES_IN || '15m' },
+}),
+RolesModule,
+],
+providers: [AuthService, JwtStrategy, KafkaProvider, MailerProvider],
+controllers: [AuthController],
+exports: [AuthService],
+})
+export class AuthModule {}
