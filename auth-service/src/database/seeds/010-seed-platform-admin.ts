@@ -12,8 +12,7 @@ export async function up(manager: EntityManager): Promise<void> {
   const userRoleRepo = manager.getRepository(UserRole);
 
   const adminEmail = process.env.ADMIN_EMAIL ?? 'abikila138@gmail.com' ;
-  const adminPassword = process.env.ADMIN_PASSWORD ;
-
+  const adminPassword = process.env.ADMIN_PASSWORD ?? 'abikila138!';
   let admin = await userRepo.findOne({ where: { email: adminEmail } });
   let created = false;
   if (!admin) {
