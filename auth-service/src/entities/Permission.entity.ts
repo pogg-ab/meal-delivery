@@ -10,7 +10,7 @@ export class Permission {
   name: string;
 
   @Column({ type: 'text', nullable: true })
-  description: string;
+  description: string|null;
 
   @OneToMany(() => RolePermission, (rolePermission) => rolePermission.permission)
   rolePermissions: RolePermission[];

@@ -132,8 +132,15 @@ export class AuthService {
    *  ========================= */
   async validateUserCredentials(email: string, password: string): Promise<User> {
     const user = await this.userRepo.findOne({
+      // where: { email },
+      // relations: ['roles', 'roles.role'],
       where: { email },
-      relations: ['roles', 'roles.role'],
+      relations: [
+        'roles',
+        'roles.role',
+        'roles.role.rolePermissions',
+        'roles.role.rolePermissions.permission',
+      ],
     });
     if (!user) throw new UnauthorizedException('Invalid credentials');
 
@@ -147,27 +154,6 @@ export class AuthService {
     return user;
   }
 
-//   async login(user: User, deviceInfo: string, ip: string) {
-//     const payload = {
-//       sub: user.user_id,
-//       email: user.email,
-//       roles: user.roles?.map((ur) => ur.role.name),
-//     };
-
-//     const accessToken = this.jwtService.sign(payload, { expiresIn: '15m' });
-//     const refreshToken = this.jwtService.sign(payload, { expiresIn: '7d' });
-
-//     // Save refresh token in DB
-//     const entity = this.tokenRepo.create({
-//       user,
-//       token_hash: await bcrypt.hash(refreshToken, 10),
-//       expires_at: new Date(Date.now() + 7 * 24 * 3600 * 1000),
-//       revoked: false,
-//     });
-//     await this.tokenRepo.save(entity);
-
-//     return { accessToken, refreshToken };
-//   }
 
 async login(user: User, deviceInfo: string, ip: string) {
   const roles = user.roles?.map((ur) => ur.role.name) || [];
@@ -203,6 +189,7 @@ async login(user: User, deviceInfo: string, ip: string) {
     permissions,
   };
 }
+
 
   async refresh(dto: RefreshTokenDto) {
     const stored = await this.tokenRepo.findOne({
