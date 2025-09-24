@@ -154,7 +154,6 @@ export class AuthService {
     return user;
   }
 
-
 async login(user: User, deviceInfo: string, ip: string) {
   const roles = user.roles?.map((ur) => ur.role.name) || [];
 
