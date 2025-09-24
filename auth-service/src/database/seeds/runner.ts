@@ -2,7 +2,6 @@
 // npx ts-node -r tsconfig-paths/register src/database/seeds/runner.ts
 // or (after build): node dist/database/seeds/runner.js
 
-// src/database/seeds/runner.ts  (verbose/debug mode)
 // src/database/seeds/runner.ts  (robust discovery)
 import 'reflect-metadata';
 import { readdirSync, existsSync } from 'fs';
