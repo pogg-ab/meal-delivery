@@ -10,6 +10,8 @@ import { AuditModule } from './modules/AuditModule/audit.module';
 import { UsersModule } from './modules/UserModule/user.module';
 import { KafkaProvider } from './providers/kafka.provider';
 import { MailerProvider } from './providers/mailer.provider';
+import { RestaurantsModule } from './modules/restaurants/restaurants.module';
+import { SharedModule } from './common/shared/shared.module';
 
 
 @Module({
@@ -41,7 +43,9 @@ import { MailerProvider } from './providers/mailer.provider';
     RolesModule,
     PermissionsModule,
     AuditModule,
-    UsersModule
+    UsersModule,
+    RestaurantsModule,
+    SharedModule
   ],
   providers: [KafkaProvider, MailerProvider],
   exports: [KafkaProvider, MailerProvider],
