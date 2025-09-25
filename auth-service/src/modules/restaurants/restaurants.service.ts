@@ -162,10 +162,11 @@ async updateStatus(
 
 
     this.kafkaProvider.emit('restaurant.approved', {
-      restaurantId: restaurant.id,
-      ownerId: restaurant.owner_id,
-      restaurantName: restaurant.name,
-    });
+    id: restaurant.id,
+    name: restaurant.name,
+    owner_id: restaurant.owner_id,
+    is_active: restaurant.is_active,
+  });
 
     try {
       await this.mailerProvider.sendMail(
@@ -181,12 +182,12 @@ async updateStatus(
 
   } else { 
     restaurant.is_active = false;
-    this.kafkaProvider.emit('restaurant.rejected', {
-      restaurantId: restaurant.id,
-      ownerId: restaurant.owner_id,
-      restaurantName: restaurant.name,
-      rejectionReason: rejection_reason,
-    });
+   this.kafkaProvider.emit('restaurant.rejected', {
+    id: restaurant.id, 
+    owner_id: restaurant.owner_id, 
+    name: restaurant.name, 
+    rejection_reason: rejection_reason, 
+  });
   }
   try {
       await this.mailerProvider.sendMail(
