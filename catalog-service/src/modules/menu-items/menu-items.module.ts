@@ -6,6 +6,7 @@ import { MenuItem } from '../../entities/menu-item.entity';
 import { MenuCategory } from '../../entities/menu-category.entity';
 import { Inventory } from '../../entities/inventory.entity';
 
+
 @Module({
   imports: [
     TypeOrmModule.forFeature([

@@ -4,7 +4,6 @@ import { CreateMenuItemDto } from './dto/create-menu-item.dto';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { UpdateMenuItemDto } from './dto/update-menu-item.dto';
-
 @ApiTags('Menu Items')
 @Controller('menu-items')
 export class MenuItemsController {
