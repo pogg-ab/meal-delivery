@@ -14,7 +14,6 @@ const requiredRoles = this.reflector.getAllAndOverride<string[]>(
 );
 if (!requiredRoles) return true;
 
-
 const { user } = context.switchToHttp().getRequest();
 return requiredRoles.some((role) => user.roles?.includes(role));
 }

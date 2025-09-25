@@ -4,13 +4,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { RegisterRestaurantDto } from './dto/register-restaurant.dto';
 
-
 import { Restaurant, RestaurantStatus } from '../../entities/restaurant.entity';
 import { Address } from '../../entities/address.entity';
 import { RestaurantHour } from '../../entities/restaurant-hour.entity';
 import { RestaurantDocument } from 'src/entities/restaurant-document.entity';
-
-import { diskStorage } from 'multer';
 import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -130,9 +127,6 @@ export class RestaurantsService {
   return savedDocument;
 }
 
-
-
-
 async updateStatus(
   restaurantId: string,
   updateStatusDto: UpdateRestaurantStatusDto,
@@ -151,7 +145,6 @@ async updateStatus(
 
   restaurant.status = status as unknown as RestaurantStatus;
   
-  
   restaurant.rejection_reason = rejection_reason || '';
 
   if (status === AdminUpdateStatus.APPROVED) {
@@ -164,8 +157,10 @@ async updateStatus(
       throw new NotFoundException('"restaurant_owner" role not found. Please seed the database.');
     }
 
-    await this.usersService.assignRole(restaurant.owner_id, ownerRole.role_id);
-    
+    // await this.usersService.assignRole(restaurant.owner_id, ownerRole.role_id);
+    await this.usersService.assignRole(restaurant.owner_id, { roleId: ownerRole.role_id });
+
+
     this.kafkaProvider.emit('restaurant.approved', {
       restaurantId: restaurant.id,
       ownerId: restaurant.owner_id,
@@ -254,6 +249,7 @@ async updateProfile(
   }
   return updatedRestaurant;
 }
+
 async findPendingReview(): Promise<Restaurant[]> {
   return this.restaurantRepository.find({
     where: {
@@ -264,6 +260,7 @@ async findPendingReview(): Promise<Restaurant[]> {
     },
   });
 }
+
 async checkOwnerStatus(ownerId: string, restaurantId: string): Promise<{ status: RestaurantStatus; rejection_reason: string | null }> {
   const restaurant = await this.restaurantRepository.findOneBy({ id: restaurantId });
 

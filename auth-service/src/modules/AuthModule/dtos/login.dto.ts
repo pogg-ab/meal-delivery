@@ -1,4 +1,4 @@
-import { IsEmail, IsNotEmpty, MinLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsNotEmpty, IsOptional, MinLength } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class LoginDto {
@@ -11,4 +11,9 @@ email: string;
 @IsNotEmpty()
 @MinLength(6)
 password: string;
+
+@ApiProperty({ description: 'Remember me (longer refresh lifetime)', required: false })
+@IsOptional()
+@IsBoolean()
+remember?: boolean;
 }

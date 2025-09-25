@@ -11,11 +11,13 @@ import { OtpVerification } from '../../entities/Otp-verification.entity';
 import { RolesModule } from '../RolesModule/roles.module';
 import { KafkaProvider } from '../../providers/kafka.provider';
 import { MailerProvider } from '../../providers/mailer.provider';
+import { Role } from '../../entities/Role.entity';
+import { UserRole } from '../../entities/User-role.entity';
 
 
 @Module({
 imports: [
-TypeOrmModule.forFeature([User, RefreshToken, OtpVerification]),
+TypeOrmModule.forFeature([User, RefreshToken, OtpVerification,Role, UserRole]),
 PassportModule.register({ defaultStrategy: 'jwt' }),
 JwtModule.register({
 secret: process.env.JWT_SECRET || 'supersecret',
