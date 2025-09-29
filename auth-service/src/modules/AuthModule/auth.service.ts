@@ -324,7 +324,7 @@ async login(user: User, deviceInfo: string, ip: string, remember = false) {
   };
 
   // Access token (short-lived)
-  const accessExpiry = process.env.JWT_ACCESS_EXPIRES ?? '15m';
+  const accessExpiry = process.env.JWT_ACCESS_EXPIRES ?? '1h';
   const accessToken = this.jwtService.sign(payloadForAccess, { expiresIn: accessExpiry });
 
   // Refresh lifetime depends on remember flag
