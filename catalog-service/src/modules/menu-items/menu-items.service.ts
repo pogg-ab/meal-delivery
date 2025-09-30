@@ -18,36 +18,40 @@ export class MenuItemsService {
     private readonly inventoryRepository: Repository<Inventory>,
   ) {}
 
-  async create(ownerId: string, createDto: CreateMenuItemDto): Promise<MenuItem> {
-    // 1. Find the category and its associated restaurant to check ownership
-    const category = await this.categoryRepository.findOne({
-      where: { id: createDto.category_id },
-      relations: ['restaurant'], // Load the restaurant relation
-    });
+  
 
-    if (!category) {
-      throw new NotFoundException(`Menu category with ID "${createDto.category_id}" not found.`);
-    }
+async create(ownerId: string, createDto: CreateMenuItemDto): Promise<MenuItem> {
+  const category = await this.categoryRepository.findOne({
+    where: { id: createDto.category_id },
+    relations: ['restaurant'],
+  });
 
-    // 2. CRITICAL: Verify the user owns the restaurant this category belongs to
-    if (category.restaurant.owner_id !== ownerId) {
-      throw new ForbiddenException('You do not have permission to add items to this category.');
-    }
-
-    // 3. Create the menu item
-    const newMenuItem = this.menuItemRepository.create(createDto);
-    const savedMenuItem = await this.menuItemRepository.save(newMenuItem);
-
-    // 4. Create a corresponding inventory record for the new item
-    const newInventory = this.inventoryRepository.create({
-      menu_item_id: savedMenuItem.id,
-      stock_quantity: 0, // Start with 0 stock by default
-    });
-    await this.inventoryRepository.save(newInventory);
-
-    // Return the newly created menu item
-    return savedMenuItem;
+  if (!category) {
+    throw new NotFoundException(`Menu category with ID "${createDto.category_id}" not found.`);
   }
+
+  if (category.restaurant.owner_id !== ownerId) {
+    throw new ForbiddenException('You do not have permission to add items to this category.');
+  }
+
+  // --- THE FIX IS HERE ---
+  const newMenuItem = this.menuItemRepository.create({
+    ...createDto,
+    is_available: false, // Always start as unavailable because stock is 0
+  });
+  // --- END OF FIX ---
+  
+  const savedMenuItem = await this.menuItemRepository.save(newMenuItem);
+
+  const newInventory = this.inventoryRepository.create({
+    menu_item_id: savedMenuItem.id,
+    stock_quantity: 0,
+    restaurant_id: category.restaurant.id,
+  });
+  await this.inventoryRepository.save(newInventory);
+
+  return savedMenuItem;
+}
   async findAllByRestaurant(restaurantId: string): Promise<MenuItem[]> {
   // We use QueryBuilder to join across multiple tables and filter effectively
   return this.menuItemRepository.createQueryBuilder('menuItem')

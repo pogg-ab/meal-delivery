@@ -5,6 +5,7 @@ import { InventoryConsumer } from './inventory.consumer';
 import { Inventory } from '../../entities/inventory.entity';
 import { InventoryLog } from '../../entities/inventory-log.entity';
 import { MenuItem } from '../../entities/menu-item.entity';
+import { InventoryController } from './inventory.controller';
 
 @Module({
   imports: [
@@ -15,6 +16,6 @@ import { MenuItem } from '../../entities/menu-item.entity';
     ]),
   ],
   providers: [InventoryService],
-  controllers: [InventoryConsumer], 
+  controllers: [InventoryConsumer, InventoryController], 
 })
 export class InventoryModule {}

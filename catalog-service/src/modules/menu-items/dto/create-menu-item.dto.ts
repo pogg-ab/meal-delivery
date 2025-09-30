@@ -22,8 +22,5 @@ export class CreateMenuItemDto {
   @IsPositive()
   price: number;
 
-  @ApiProperty({ description: 'Manually set if the item is available, ignoring stock. Defaults to true.', required: false })
-  @IsOptional()
-  @IsBoolean()
-  is_available?: boolean;
+
 }

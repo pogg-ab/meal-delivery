@@ -127,48 +127,69 @@ export class OrdersService {
   /**
    * Owner responds to an order. Emits 'order.awaiting_payment' when accepted.
    */
-  async ownerResponse(ownerId: string, orderId: string, accepted: boolean, reason?: string) {
-    const order = await this.orderRepo.findOne({ where: { id: orderId }, relations: ['restaurant', 'items'] });
-    if (!order) throw new NotFoundException('Order not found');
-    if (!order.restaurant || order.restaurant.owner_id !== ownerId) throw new BadRequestException('Not authorized');
+async ownerResponse(ownerId: string, orderId: string, accepted: boolean, reason?: string) {
+  const order = await this.orderRepo.findOne({ where: { id: orderId }, relations: ['restaurant', 'items'] });
+  if (!order) throw new NotFoundException('Order not found');
+  if (!order.restaurant || order.restaurant.owner_id !== ownerId) throw new BadRequestException('Not authorized');
 
-    order.status = accepted ? OrderStatus.ACCEPTED : OrderStatus.DECLINED;
-    await this.orderRepo.save(order);
+  // --- THIS IS THE CRITICAL FIX ---
+  // 1. Add a state check. Only allow this action if the order is PENDING.
+  if (order.status !== OrderStatus.PENDING) {
+    throw new BadRequestException('This order has already been processed and cannot be changed.');
+  }
+  // --- END OF FIX ---
 
-    await this.orderRepo.manager.getRepository(OrderEvent).save(
-      this.orderRepo.manager.getRepository(OrderEvent).create({
-        order_id: order.id,
-        actor_id: ownerId,
-        action: accepted ? 'OWNER_ACCEPTED' : 'OWNER_DECLINED',
-        meta: reason ? { reason } : undefined,
-      } as DeepPartial<OrderEvent>),
-    );
+  order.status = accepted ? OrderStatus.ACCEPTED : OrderStatus.DECLINED;
+  await this.orderRepo.save(order);
 
-    this.gateway.emitOrderUpdated(order);
+  await this.orderRepo.manager.getRepository(OrderEvent).save(
+    this.orderRepo.manager.getRepository(OrderEvent).create({
+      order_id: order.id,
+      actor_id: ownerId,
+      action: accepted ? 'OWNER_ACCEPTED' : 'OWNER_DECLINED',
+      meta: reason ? { reason } : undefined,
+    } as DeepPartial<OrderEvent>),
+  );
 
-    if (accepted) {
-      // ask Payment service to start payment flow
-      const payload = {
-        order_id: order.id,
-        amount: Number(order.total_amount),
-        currency: order.currency,
-        customer_id: order.customer_id,
-        restaurant_id: order.restaurant_id,
-      };
+  this.gateway.emitOrderUpdated(order);
 
-      try {
-        await this.kafka.emit('order.awaiting_payment', payload);
-      } catch (e) {
-        this.logger.warn('Kafka emit failed for order.awaiting_payment', e as any);
-      }
-
-      order.status = OrderStatus.AWAITING_PAYMENT;
-      await this.orderRepo.save(order);
-      this.gateway.emitOrderUpdated(order);
+  if (accepted) {
+    // This logic now only runs ONCE, when the order is accepted from a PENDING state.
+    const inventoryPayload = {
+      orderId: order.id,
+      items: order.items.map(item => ({
+        menuItemId: item.menu_item_id,
+        quantity: item.quantity,
+      })),
+    };
+    try {
+      await this.kafka.emit('order.confirmed', inventoryPayload);
+      this.logger.log(`Published order.confirmed event for order ${order.id}`);
+    } catch (e) {
+      this.logger.warn('Kafka emit failed for order.confirmed', e as any);
     }
 
-    return { ok: true };
+    // 2. Ask Payment service to start payment flow (your existing logic)
+    const paymentPayload = {
+      order_id: order.id,
+      amount: Number(order.total_amount),
+      currency: order.currency,
+      customer_id: order.customer_id,
+      restaurant_id: order.restaurant_id,
+    };
+    try {
+      await this.kafka.emit('order.awaiting_payment', paymentPayload);
+    } catch (e) {
+      this.logger.warn('Kafka emit failed for order.awaiting_payment', e as any);
+    }
+
+    order.status = OrderStatus.AWAITING_PAYMENT;
+    await this.orderRepo.save(order);
+    this.gateway.emitOrderUpdated(order);
   }
+
+  return { ok: true };
+}
 
   /**
    * Handle payment result events (payment.success / payment.failed).
