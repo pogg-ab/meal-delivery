@@ -40,7 +40,7 @@ export class MenuItem {
   @ManyToOne(() => MenuCategory, (category) => category.menu_items)
   @JoinColumn({ name: 'category_id' })
   category: MenuCategory;
-
-  @OneToOne(() => Inventory, (inventory) => inventory.menu_item)
+  
+ @OneToOne(() => Inventory, (inventory) => inventory.menu_item) // Updated to match Inventory entity
   inventory: Inventory;
 }

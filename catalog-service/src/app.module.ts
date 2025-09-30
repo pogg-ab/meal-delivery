@@ -1,16 +1,19 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
-import { InventoryModule } from './modules/inventory/inventory.module';
+
+// --- Combined Imports ---
+import { ScheduleModule } from '@nestjs/schedule';
+import { OrdersModule } from './modules/order/order.module';
+import { KafkaProvider } from './providers/kafka.provider';
+import { ReportsModule } from './modules/reports/reports.module';
+
+// Assuming imports for your other modules are here too
+import { SharedModule } from './common/shared/shared.module'; // Or correct path
 import { RestaurantsModule } from './modules/restaurants/restaurants.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { MenuItemsModule } from './modules/menu-items/menu-items.module';
-import { SharedModule } from './common/shared/shared.module';
-import { OrdersModule } from './modules/order/order.module';
-import { KafkaProvider } from './providers/kafka.provider';
-
+import { InventoryModule } from './modules/inventory/inventory.module';
 
 @Module({
   imports: [
@@ -31,15 +34,18 @@ import { KafkaProvider } from './providers/kafka.provider';
         migrations: [__dirname + '/migrations/*{.ts,.js}'],
       }),
     }),
+
+    // --- Combined Modules ---
+    ScheduleModule.forRoot(), // From the right side
     SharedModule,
-    RestaurantsModule, 
-    CategoriesModule,  // For the /categories endpoints
-    MenuItemsModule,   // For the /menu-items endpoints
-    InventoryModule,   // For the /inventory endpoints and consumer
-    OrdersModule 
+    RestaurantsModule,
+    CategoriesModule, // For the /categories endpoints
+    MenuItemsModule, // For the /menu-items endpoints
+    InventoryModule, // For the /inventory endpoints and consumer
+    OrdersModule,
+    ReportsModule, // From the left side
   ],
   providers: [KafkaProvider],
-  exports: [KafkaProvider]
+  exports: [KafkaProvider],
 })
 export class AppModule {}
-
