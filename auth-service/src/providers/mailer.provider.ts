@@ -1,42 +1,4 @@
-// import { Injectable, Logger } from '@nestjs/common';
-// import * as nodemailer from 'nodemailer';
 
-
-// @Injectable()
-// export class MailerProvider {
-// private readonly logger = new Logger(MailerProvider.name);
-// private transporter: nodemailer.Transporter;
-
-
-// constructor() {
-// this.transporter = nodemailer.createTransport({
-// host: process.env.MAILER_HOST,
-// port: Number(process.env.MAILER_PORT) || 587,
-// secure: true,
-// auth: {
-// user: process.env.MAILER_USER,
-// pass: process.env.MAILER_PASS,
-// },
-// });
-// }
-
-
-// async sendMail(to: string, subject: string, text: string, html?: string) {
-// try {
-// await this.transporter.sendMail({
-// from: process.env.MAILER_FROM,
-// to,
-// subject,
-// text,
-// html,
-// });
-// this.logger.log(`Email sent to ${to} with subject: ${subject}`);
-// } catch (error) {
-// this.logger.error('Failed to send email', error.stack);
-// throw error;
-// }
-// }
-// }
 
 import { Injectable, Logger } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
@@ -116,6 +78,20 @@ export class MailerProvider {
     </html>
     `;
 
+    return this.sendMail(to, subject, text, html);
+  }
+
+  async sendPasswordResetEmail(to: string, otp: string) {
+    const subject = 'Reset your password - ERP System';
+    const text = `Your password reset OTP is ${otp}. It expires in 10 minutes.`;
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width:600px; margin:auto;">
+        <h2>Password reset</h2>
+        <p>Use the OTP below to reset your password:</p>
+        <div style="font-size:24px; font-weight:bold; letter-spacing:4px;">${otp}</div>
+        <p>This code will expire in 10 minutes.</p>
+      </div>
+    `;
     return this.sendMail(to, subject, text, html);
   }
 }

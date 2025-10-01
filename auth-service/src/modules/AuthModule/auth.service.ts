@@ -4,6 +4,7 @@ import {
   UnauthorizedException,
   BadRequestException,
   Logger,
+  NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Any, Repository } from 'typeorm';
@@ -20,6 +21,9 @@ import { KafkaProvider } from '../../providers/kafka.provider';
 import { RolesService } from '../RolesModule/roles.service';
 import { RegisterDto } from './dtos/register.dto';
 import { VerifyOtpDto } from './dtos/verify-otp.dto';
+import { ResendOtpDto } from './dtos/resend-otp.dto';
+import { ForgotPasswordDto } from './dtos/forgot-password.dto';
+import { ResetPasswordDto } from './dtos/reset-password.dto';
 import { RefreshTokenDto } from './dtos/refresh-token.dto';
 import { Role } from '../../entities/Role.entity';
 import { UserRole } from '../../entities/User-role.entity';
@@ -63,12 +67,10 @@ export class AuthService {
     // 2) hash password
     const hash = await PasswordHashUtil.hash(dto.password);
   
-    // We'll capture OTP plain text here to send after commit (never persist plain text)
     const otpPlain = OtpUtil.generateOtp();
     const otpHash = crypto.createHash('sha256').update(otpPlain).digest('hex');
     const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
   
-    // 3) perform DB changes inside a transaction (user, user_role, otp)
     const { savedUser } = await this.userRepo.manager.transaction(async (manager) => {
       const uRepo = manager.getRepository(User);
       const rRepo = manager.getRepository(Role);
@@ -99,7 +101,6 @@ export class AuthService {
         user_id: saved.user_id,
         role_id: customerRole.role_id,
       });
-      // Save mapping (no duplicate check because transaction and DB constraints will prevent dupes)
       await urRepo.save(userRole);
   
       // create OTP record (hashed)
@@ -112,14 +113,12 @@ export class AuthService {
       });
       await oRepo.save(otpRecord);
       return { savedUser: saved };
-    }); // transaction commits here or rolls back on error
-  
-    // 4) After commit: send OTP email and emit kafka event (non-fatal)
+    }); 
+
     try {
       await this.mailer.sendOtpEmail(savedUser.email, otpPlain);
     } catch (err) {
       this.logger?.error('Failed to send OTP email', err as any);
-      // continue — do not roll back transaction for email failure
     }
   
     try {
@@ -172,8 +171,6 @@ export class AuthService {
   
   async validateUserCredentials(email: string, password: string): Promise<User> {
     const user = await this.userRepo.findOne({
-      // where: { email },
-      // relations: ['roles', 'roles.role'],
       where: { email },
       relations: [
         'roles',
@@ -194,106 +191,13 @@ export class AuthService {
     return user;
   }
 
-// async login(user: User, deviceInfo: string, ip: string) {
-//   const roles = user.roles?.map((ur) => ur.role.name) || [];
-
-//   // Collect permissions from role -> rolePermissions -> permission
-//   const permissions = user.roles
-//     ?.flatMap((ur) => ur.role.rolePermissions?.map((rp) => rp.permission.name))
-//     .filter((p) => !!p) || [];
-
-//   const payload = {
-//     sub: user.user_id,
-//     email: user.email,
-//     roles,
-//     permissions,
-//   };
-
-//   const accessToken = this.jwtService.sign(payload, { expiresIn: '15m' });
-//   const refreshToken = this.jwtService.sign(payload, { expiresIn: '7d' });
-
-//   // Save refresh token in DB
-//   const entity = this.tokenRepo.create({
-//     user,
-//     token_hash: await bcrypt.hash(refreshToken, 10),
-//     expires_at: new Date(Date.now() + 7 * 24 * 3600 * 1000),
-//     revoked: false,
-//   });
-//   await this.tokenRepo.save(entity);
-
-//   return {
-//     accessToken,
-//     refreshToken,
-//     roles,
-//     permissions,
-//   };
-// }
-
-//   async refresh(dto: RefreshTokenDto) {
-//     const stored = await this.tokenRepo.findOne({
-//       where: { revoked: false },
-//       relations: ['user'],
-//     });
-//     if (!stored) throw new UnauthorizedException('Invalid refresh token');
-
-//     const valid = await bcrypt.compare(dto.refreshToken, stored.token_hash);
-//     if (!valid) throw new UnauthorizedException('Invalid refresh token');
-
-//     const user = await this.userRepo.findOne({
-//       where: { user_id: stored.user.user_id },
-//       relations: ['roles', 'roles.role'],
-//     });
-//     if (!user) throw new UnauthorizedException('User not found');
-
-//     return this.login(user, 'refresh', 'system');
-//   }
-
-//   async revoke(refreshPlain: string) {
-//     const tokens = await this.tokenRepo.find();
-//     for (const t of tokens) {
-//       if (await bcrypt.compare(refreshPlain, t.token_hash)) {
-//         t.revoked = true;
-//         await this.tokenRepo.save(t);
-//         return { success: true };
-//       }
-//     }
-//     throw new UnauthorizedException('Refresh token not found');
-//   }
-
-// async logout(userId: string, refreshPlain: string) {
-//   const tokens = await this.tokenRepo.find({
-//     where: { user: { user_id: userId }, revoked: false },
-//     relations: ['user'],
-//   });
-
-//   for (const t of tokens) {
-//     const match = await bcrypt.compare(refreshPlain, t.token_hash);
-//     if (match) {
-//       t.revoked = true;
-//       await this.tokenRepo.save(t);
-
-//       // optional audit log / kafka emit
-//       await this.kafka.emit('identity.user.logged_out', {
-//         user_id: userId,
-//         token_id: t.id,
-//         revoked_at: new Date(),
-//       });
-
-//       return { success: true, message: 'Logged out successfully' };
-//     }
-//   }
-
-//   throw new UnauthorizedException('Refresh token not found or already revoked');
-// }
 async login(user: User, deviceInfo: string, ip: string, remember = false) {
-  // -- 1) Build roles & permissions (from loaded relations if present)
   const roles = (user.roles ?? []).map((ur) => ur.role?.name).filter(Boolean) as string[];
   let permissions = (user.roles ?? [])
     .flatMap((ur) => ur.role?.rolePermissions ?? [])
     .map((rp) => rp.permission?.name)
     .filter(Boolean) as string[];
 
-  // If empty perms (just in case), fallback to DB query (robust)
   if (!permissions || permissions.length === 0) {
     try {
       const rows = await this.userRepo.manager
@@ -326,13 +230,10 @@ async login(user: User, deviceInfo: string, ip: string, remember = false) {
   // Access token (short-lived)
   const accessExpiry = process.env.JWT_ACCESS_EXPIRES ?? '1h';
   const accessToken = this.jwtService.sign(payloadForAccess, { expiresIn: accessExpiry });
-
-  // Refresh lifetime depends on remember flag
   const refreshDays = remember ? Number(process.env.JWT_REMEMBER_DAYS ?? 30) : Number(process.env.JWT_REFRESH_DAYS ?? 7);
   const refreshExpiry = `${refreshDays}d`;
   const expiresAt = new Date(Date.now() + refreshDays * 24 * 60 * 60 * 1000);
 
-  // 2) Create DB refresh token record first (so we have an id to embed in the JWT)
   const tokenRecord = this.tokenRepo.create({
     user,
     token_hash: '', // will set after signing
@@ -366,9 +267,6 @@ async login(user: User, deviceInfo: string, ip: string, remember = false) {
   };
 }
 
-// -------------------------
-// REFRESH (rotate)
-// -------------------------
 async refresh(dto: RefreshTokenDto) {
   const presented = dto.refreshToken;
   let payload: any;
@@ -428,18 +326,16 @@ async refresh(dto: RefreshTokenDto) {
   } as Partial<RefreshToken>);
   const savedNew = await this.tokenRepo.save(newRecord);
 
-  // sign new refresh token (include tid)
+  
   const newRefreshPayload = {
     sub: stored.user.user_id,
     tid: savedNew.id,
   };
   const newRefreshPlain = this.jwtService.sign(newRefreshPayload, { expiresIn: Math.ceil(originalLifetimeMs / 1000) + 's' });
 
-  // persist hash
   savedNew.token_hash = await bcrypt.hash(newRefreshPlain, 10);
   await this.tokenRepo.save(savedNew);
 
-  // sign a new access token - include roles/permissions (load from DB if needed)
   const userWithRoles = await this.userRepo.findOne({
     where: { user_id: stored.user.user_id },
     relations: ['roles', 'roles.role', 'roles.role.rolePermissions', 'roles.role.rolePermissions.permission'],
@@ -465,9 +361,6 @@ async refresh(dto: RefreshTokenDto) {
   };
 }
 
-// -------------------------
-// REVOKE & LOGOUT
-// -------------------------
 async revoke(refreshPlain: string) {
   const tokens = await this.tokenRepo.find();
   for (const t of tokens) {
@@ -505,4 +398,130 @@ async logout(userId: string, refreshPlain: string) {
 
   throw new UnauthorizedException('Refresh token not found or already revoked');
 }
+
+
+/** Helper: create and persist OTP record, return plain OTP (not stored) */
+private async createAndSendOtp(user: User, purpose: 'registration' | 'password_reset', channel = 'email') {
+  const otpPlain = OtpUtil.generateOtp();
+  const otpHash = crypto.createHash('sha256').update(otpPlain).digest('hex');
+  const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+  const otpRecord = this.otpRepo.create({
+    user,
+    otp_hash: otpHash,
+    purpose,
+    channel,
+    expires_at: otpExpiresAt,
+    attempts: 0,
+    used: false,
+  } as Partial<OtpVerification>);
+
+  await this.otpRepo.save(otpRecord);
+
+  // send appropriate email (non-fatal)
+  try {
+    if (purpose === 'registration') {
+      await this.mailer.sendOtpEmail(user.email, otpPlain);
+    } else {
+      await this.mailer.sendPasswordResetEmail(user.email, otpPlain);
+    }
+  } catch (err) {
+    this.logger.warn('Failed to send OTP email in createAndSendOtp', err as any);
+  }
+
+  return { otpPlain, otpRecord };
+}
+
+/** Resend OTP if previous is expired or used, otherwise inform user OTP still active */
+async resendOtp(email: string, purpose: 'registration' | 'password_reset' = 'registration') {
+  const user = await this.userRepo.findOne({ where: { email } });
+  if (!user) throw new NotFoundException('User not found');
+
+  // fetch latest otp for this user & purpose
+  const last = await this.otpRepo.findOne({
+    where: { user: { user_id: user.user_id }, purpose },
+    order: { created_at: 'DESC' },
+  });
+
+  // If there is a last and it's still valid and not used -> do not resend
+  if (last && !last.used && last.expires_at > new Date()) {
+    const remainingMs = last.expires_at.getTime() - Date.now();
+    const remainingMin = Math.ceil(remainingMs / 60000);
+    return { ok: false, message: `OTP still valid. Try again in ${remainingMin} minute(s)` };
+  }
+
+  // else create & send new OTP
+  const { otpRecord } = await this.createAndSendOtp(user, purpose, 'email');
+
+  // not returning plain otp - only meta
+  return { ok: true, message: 'otp_sent', otp_id: otpRecord.otp_id, expires_at: otpRecord.expires_at };
+}
+
+/** Forgot password: generate password_reset OTP */
+async forgotPassword(email: string) {
+  const user = await this.userRepo.findOne({ where: { email } });
+  if (!user) {
+    // For security, don't reveal whether email exists; still return ok
+    return { ok: true, message: 'otp_sent_if_user_exists' };
+  }
+
+  // similar throttling as resend - create fresh OTP only if none active
+  const last = await this.otpRepo.findOne({
+    where: { user: { user_id: user.user_id }, purpose: 'password_reset' },
+    order: { created_at: 'DESC' },
+  });
+
+  if (last && !last.used && last.expires_at > new Date()) {
+    return { ok: true, message: 'otp_already_sent' };
+  }
+
+  await this.createAndSendOtp(user, 'password_reset', 'email');
+  return { ok: true, message: 'otp_sent' };
+}
+
+/** Reset password: verify OTP (purpose=password_reset), set new password, revoke refresh tokens */
+async resetPassword(dto: ResetPasswordDto) {
+  const user = await this.userRepo.findOne({ where: { email: dto.email } });
+  if (!user) throw new BadRequestException('Invalid credentials');
+
+  const otpHash = crypto.createHash('sha256').update(dto.otp).digest('hex');
+
+  const record = await this.otpRepo.findOne({
+    where: {
+      user: { user_id: user.user_id },
+      otp_hash: otpHash,
+      purpose: 'password_reset',
+      used: false,
+    },
+    order: { created_at: 'DESC' },
+    relations: ['user'],
+  });
+
+  if (!record) throw new BadRequestException('Invalid or expired OTP');
+  if (record.expires_at < new Date()) {
+    throw new BadRequestException('OTP expired');
+  }
+
+  // mark used
+  record.used = true;
+  await this.otpRepo.save(record);
+
+  // update password
+  const newHash = await PasswordHashUtil.hash(dto.newPassword);
+  user.password_hash = newHash;
+  await this.userRepo.save(user);
+
+  // Revoke all user's refresh tokens (best practice)
+  await this.tokenRepo.update({ user: { user_id: user.user_id } }, { revoked: true });
+
+  // emit kafka / audit
+  try {
+    await this.kafka.emit('identity.user.password_reset', { user_id: user.user_id, at: new Date() });
+  } catch (err) {
+    this.logger.warn('Failed to emit password reset event', err as any);
+  }
+
+  return { ok: true, message: 'password_reset_success' };
+ }
+
 }

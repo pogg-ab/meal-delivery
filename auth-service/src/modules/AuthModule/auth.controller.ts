@@ -1,7 +1,7 @@
 
 import { Controller, Post, Body, Req, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dtos/register.dto';
 import { LoginDto } from './dtos/login.dto';
@@ -12,6 +12,9 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { LoginResponseDto } from './dtos/login-response.dto';
 import { ApiOkResponse } from '@nestjs/swagger';
+import { ResendOtpDto } from './dtos/resend-otp.dto';
+import { ForgotPasswordDto } from './dtos/forgot-password.dto';
+import { ResetPasswordDto } from './dtos/reset-password.dto';
 
 @ApiTags('Auth') // Groups under "Auth"
 @Controller('auth')
@@ -31,21 +34,6 @@ export class AuthController {
     return this.authService.verifyOtp(dto);
   }
 
-
-// @Post('login')
-// @ApiOperation({ summary: 'User login' })
-// @ApiOkResponse({ type: LoginResponseDto })
-// async login(@Body() dto: LoginDto, @Req() req: Request): Promise<LoginResponseDto> {
-//   const user = await this.authService.validateUserCredentials(dto.email, dto.password);
-
-//   const userAgent = Array.isArray(req.headers['user-agent'])
-//     ? req.headers['user-agent'][0]
-//     : req.headers['user-agent'] || 'unknown';
-
-//   const ip = req.ip || req.connection.remoteAddress || 'unknown';
-
-//   return this.authService.login(user, userAgent, ip);
-// }
 
 @Post('login')
 @ApiOperation({ summary: 'User login' })
@@ -83,6 +71,31 @@ async login(@Body() dto: LoginDto, @Req() req: Request): Promise<LoginResponseDt
   @ApiOperation({ summary: 'Logout user (revoke refresh token)' })
   async logout(@CurrentUser('sub') userId: string, @Body() dto: LogoutDto) {
     return this.authService.logout(userId, dto.refreshToken);
+  }
+
+
+  @Post('resend')
+  @ApiOperation({ summary: 'Resend OTP (if previous expired or used)' })
+  @ApiResponse({ status: 200, description: 'Resent OTP or informed still valid' })
+  @ApiBody({ type: ResendOtpDto })
+  async resendOtp(@Body() dto: ResendOtpDto) {
+    return this.authService.resendOtp(dto.email, (dto as any).purpose ?? 'registration');
+  }
+
+  @Post('forgot-password')
+  @ApiOperation({ summary: 'Request password reset OTP (forgot password)' })
+  @ApiResponse({ status: 200, description: 'OTP sent if user exists (generic response)' })
+  @ApiBody({ type: ForgotPasswordDto })
+  async forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto.email);
+  }
+
+  @Post('reset-password')
+  @ApiOperation({ summary: 'Reset password using password reset OTP' })
+  @ApiResponse({ status: 200, description: 'Password reset successful' })
+  @ApiBody({ type: ResetPasswordDto })
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto);
   }
   
 }
