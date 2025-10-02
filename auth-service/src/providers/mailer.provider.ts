@@ -41,7 +41,7 @@ export class MailerProvider {
    * OTP Email Template
    * ============================== */
   async sendOtpEmail(to: string, otp: string) {
-    const subject = 'Verify your account - ERP System';
+    const subject = 'Verify your account - Meal delivery System';
     const text = `Your OTP code is ${otp}. It expires in 10 minutes.`;
 
     const html = `
@@ -71,7 +71,7 @@ export class MailerProvider {
         <p>If you did not request this, you can safely ignore this email.</p>
         <p>Thank you,<br/>Meal delivery System Team</p>
         <div class="footer">
-          <p>&copy; ${new Date().getFullYear()} ERP System. All rights reserved.</p>
+          <p>&copy; ${new Date().getFullYear()} Meal delivery System. All rights reserved.</p>
         </div>
       </div>
     </body>
