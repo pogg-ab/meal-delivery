@@ -12,6 +12,8 @@ import { Restaurant } from '../../entities/restaurant.entity';
 import { OrderGateway } from '../../gateways/order.gateway';
 import { KafkaProvider } from 'src/providers/kafka.provider';
 import { CreateOrderDto } from './dtos/create-order.dto';
+import { CancelOrderDto } from './dtos/cancel-order.dto';
+import { OwnerPreparingDto } from './dtos/owner-preparing.dto';
 
 @Injectable()
 export class OrdersService {
@@ -278,11 +280,38 @@ async ownerResponse(ownerId: string, orderId: string, accepted: boolean, reason?
     return order;
   }
 
-  /**
-   * Owner API: toggle a menu item's availability.
-   * - Ensures the caller owns the restaurant.
-   * - Ensures menu item belongs to the restaurant.
-   */
+async getOrdersByCustomer(customerId: string, limit = 50, offset = 0) {
+    const take = Math.max(1, Math.min(limit, 100));
+    const skip = Math.max(0, offset);
+
+    const orders = await this.orderRepo.find({
+      where: { customer_id: customerId },
+      relations: ['items', 'events', 'restaurant'],
+      order: { created_at: 'DESC' },
+      take,
+      skip,
+    });
+    return orders;
+  }
+
+async getOrdersByRestaurant(ownerId: string, restaurantId: string, limit = 50, offset = 0) {
+  // verify restaurant exists and owner
+  const restaurant = await this.restaurantRepo.findOne({ where: { id: restaurantId } });
+  if (!restaurant) throw new NotFoundException('Restaurant not found');
+  if (restaurant.owner_id !== ownerId) throw new BadRequestException('Not authorized');
+
+  const take = Math.max(1, Math.min(limit, 100));
+  const skip = Math.max(0, offset);
+
+  const orders = await this.orderRepo.find({
+    where: { restaurant_id: restaurantId },
+    relations: ['items', 'events', 'restaurant'],
+    order: { created_at: 'DESC' },
+    take,
+    skip,
+  });
+  return orders;
+ }
   async toggleMenuAvailability(ownerId: string, restaurantId: string, menuItemId: string, is_available: boolean) {
     // verify restaurant ownership
     const restaurant = await this.restaurantRepo.findOne({ where: { id: restaurantId } });
@@ -320,4 +349,94 @@ async ownerResponse(ownerId: string, orderId: string, accepted: boolean, reason?
 
     return { ok: true, menu_item_id: menuItemId, is_available: menu.is_available };
   }
+
+async markOrderPreparing(ownerId: string, orderId: string, note?: string) {
+  return await this.dataSource.transaction(async (manager) => {
+  const orderRepo = manager.getRepository(Order);
+  const eventRepo = manager.getRepository(OrderEvent);
+
+
+const order = await orderRepo.findOne({ where: { id: orderId }, relations: ['restaurant', 'items'] });
+if (!order) throw new NotFoundException('Order not found');
+if (!order.restaurant || order.restaurant.owner_id !== ownerId) throw new BadRequestException('Not authorized');
+
+
+// Only allow preparing after payment is confirmed
+if (order.status !== OrderStatus.PAID) {
+throw new BadRequestException('Order cannot be marked preparing until payment is confirmed');
+}
+
+
+order.status = OrderStatus.PREPARING;
+await orderRepo.save(order);
+
+
+await eventRepo.save(eventRepo.create({
+order_id: order.id,
+actor_id: ownerId,
+action: 'OWNER_PREPARING',
+meta: note ? { note } : undefined,
+} as DeepPartial<OrderEvent>));
+
+
+// emit after commit
+return order;
+}).then(async (committedOrder) => {
+// Notify clients and other services
+this.gateway.emitOrderUpdated(committedOrder);
+try {
+await this.kafka.emit('order.preparing', { order_id: committedOrder.id, restaurant_id: committedOrder.restaurant_id });
+} catch (e) {
+this.logger.warn('Kafka emit failed for order.preparing', e as any);
+}
+return { ok: true };
+});
+}
+
+
+async cancelOrder(customerId: string, orderId: string, reason?: string) {
+return await this.dataSource.transaction(async (manager) => {
+const orderRepo = manager.getRepository(Order);
+const eventRepo = manager.getRepository(OrderEvent);
+
+const order = await orderRepo.findOne({ where: { id: orderId }, relations: ['items'] });
+if (!order) throw new NotFoundException('Order not found');
+if (order.customer_id !== customerId) throw new BadRequestException('Not your order');
+
+// Prevent cancellation after payment succeeded
+if (order.payment_status === PaymentStatus.PAID) {
+throw new BadRequestException('Cannot cancel an order that has been paid');
+}
+
+// Allow cancellation only when order is still in pre-preparing states
+const cancellable = [OrderStatus.PENDING, OrderStatus.AWAITING_PAYMENT, OrderStatus.ACCEPTED];
+if (!cancellable.includes(order.status)) {
+throw new BadRequestException('Order cannot be cancelled at this stage');
+}
+
+// Use CANCELLED if enum exists, otherwise fallback to DECLINED
+const cancelledStatus = (OrderStatus as any).CANCELLED ?? OrderStatus.DECLINED;
+order.status = cancelledStatus;
+await orderRepo.save(order);
+
+
+await eventRepo.save(eventRepo.create({
+order_id: order.id,
+actor_id: customerId,
+action: 'CUSTOMER_CANCELLED',
+meta: reason ? { reason } : undefined,
+} as DeepPartial<OrderEvent>));
+
+return order;
+}).then(async (committedOrder) => {
+this.gateway.emitOrderUpdated(committedOrder);
+try {
+await this.kafka.emit('order.cancelled', { order_id: committedOrder.id, reason });
+} catch (e) {
+this.logger.warn('Kafka emit failed for order.cancelled', e as any);
+}
+return { ok: true };
+});
+}
+
 }

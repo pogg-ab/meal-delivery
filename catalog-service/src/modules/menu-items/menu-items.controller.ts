@@ -17,11 +17,13 @@ export class MenuItemsController {
     const ownerId = req.user.userId;
     return this.menuItemsService.create(ownerId, createMenuItemDto);
   }
-  @Get('/restaurant/:restaurantId')
+
+@Get('/restaurant/:restaurantId')
 @ApiOperation({ summary: 'Fetch all public menu items for a restaurant' })
 findAllByRestaurant(@Param('restaurantId') restaurantId: string) {
   return this.menuItemsService.findAllByRestaurant(restaurantId);
 }
+
 @Put(':id')
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth('access-token')

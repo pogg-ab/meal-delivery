@@ -98,7 +98,8 @@ export class RestaurantsController {
   ) {
     return this.restaurantsService.updateStatus(restaurantId, updateStatusDto);
   }
-  @Put(':id')
+
+@Put(':id')
 @UseGuards(JwtAuthGuard) // Only authenticated users
 @ApiBearerAuth('access-token')
 @ApiOperation({ summary: "Update a restaurant's profile (Owner only)" })
@@ -110,6 +111,7 @@ updateProfile(
   const ownerId = req.user.userId;
   return this.restaurantsService.updateProfile(ownerId, restaurantId, updateRestaurantDto);
 }
+
 @Get('pending-review')
 @Roles('platform_admin')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -118,6 +120,7 @@ updateProfile(
 getPendingRestaurants() {
   return this.restaurantsService.findPendingReview();
 }
+
 @Get(':id/status')
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth('access-token')
@@ -129,5 +132,4 @@ checkStatus(
   const ownerId = req.user.userId;
   return this.restaurantsService.checkOwnerStatus(ownerId, restaurantId);
 }
-
 }

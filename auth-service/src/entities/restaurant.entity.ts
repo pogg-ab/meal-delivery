@@ -55,6 +55,18 @@ export class Restaurant {
   @Column({ type: 'text', nullable: true }) // <-- NEWLY ADDED COLUMN
   rejection_reason: string;
 
+   @Column({
+    type: 'numeric',
+    precision: 3, // allows up to 9.99 but we'll keep ratings between 0 and 5
+    scale: 2,
+    default: 0,
+  })
+  average_rating: number;
+
+
+  @Column({ type: 'integer', default: 0 })
+  ratings_count: number;
+
   @CreateDateColumn()
   created_at: Date;
 

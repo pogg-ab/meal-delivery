@@ -1,13 +1,16 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+
+import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { Inventory } from '../../entities/inventory.entity';
 import { InventoryLog, InventoryChangeType } from '../../entities/inventory-log.entity';
 import { MenuItem } from '../../entities/menu-item.entity';
+import { MenuCategory } from '../../entities/menu-category.entity';
+import { Restaurant } from '../../entities/restaurant.entity';
 import { ReplenishItemDto } from './dto/replenish-item.dto';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
-// This interface for the Kafka payload can remain camelCase as it's a DTO contract
+// Order deduction payload
 interface OrderItemPayload {
   menuItemId: string;
   quantity: number;
@@ -21,62 +24,59 @@ export class InventoryService {
     private readonly dataSource: DataSource,
     @InjectRepository(Inventory) private readonly inventoryRepository: Repository<Inventory>,
     @InjectRepository(MenuItem) private readonly menuItemRepository: Repository<MenuItem>,
+    @InjectRepository(MenuCategory) private readonly categoryRepository: Repository<MenuCategory>,
+    @InjectRepository(Restaurant) private readonly restaurantRepository: Repository<Restaurant>,
     @InjectRepository(InventoryLog) private readonly inventoryLogRepository: Repository<InventoryLog>,
   ) {}
 
-
-  @Cron(CronExpression.EVERY_5_MINUTES) // Runs every 15 minutes
-async handleCron() {
-  this.logger.log('Running scheduled job to sync inventory and menu availability...');
-  await this.syncAvailability();
-}
-
-async syncAvailability(): Promise<{ madeAvailable: number; madeUnavailable: number }> {
-  const queryRunner = this.dataSource.createQueryRunner();
-  await queryRunner.connect();
-
-  try {
-    // 1. Find items that ARE unavailable but SHOULD be available (stock > 0)
-    const itemsToMakeAvailable = await queryRunner.manager
-      .createQueryBuilder(MenuItem, 'menuItem')
-      .innerJoin('inventory', 'inv', 'inv.menu_item_id = menuItem.id')
-      .where('menuItem.is_available = :isAvailable', { isAvailable: false })
-      .andWhere('inv.stock_quantity > 0')
-      .getMany();
-
-    if (itemsToMakeAvailable.length > 0) {
-      const ids = itemsToMakeAvailable.map((item) => item.id);
-      await queryRunner.manager.update(MenuItem, ids, { is_available: true });
-      this.logger.log(`Scheduled sync: Made ${ids.length} item(s) available.`);
-    }
-
-    // 2. Find items that ARE available but SHOULD be unavailable (stock <= 0)
-    const itemsToMakeUnavailable = await queryRunner.manager
-      .createQueryBuilder(MenuItem, 'menuItem')
-      .innerJoin('inventory', 'inv', 'inv.menu_item_id = menuItem.id')
-      .where('menuItem.is_available = :isAvailable', { isAvailable: true })
-      .andWhere('inv.stock_quantity <= 0')
-      .getMany();
-
-    if (itemsToMakeUnavailable.length > 0) {
-      const ids = itemsToMakeUnavailable.map((item) => item.id);
-      await queryRunner.manager.update(MenuItem, ids, { is_available: false });
-      this.logger.log(`Scheduled sync: Made ${ids.length} item(s) unavailable.`);
-    }
-
-    return {
-      madeAvailable: itemsToMakeAvailable.length,
-      madeUnavailable: itemsToMakeUnavailable.length,
-    };
-  } catch (error) {
-    this.logger.error('Error during scheduled inventory sync:', error.stack);
-    // We don't re-throw here because we don't want to crash the whole app on a cron job failure
-    return { madeAvailable: 0, madeUnavailable: 0 };
-  } finally {
-    await queryRunner.release();
+  // ---------- Cron: sync availability ----------
+  @Cron(CronExpression.EVERY_5_MINUTES)
+  async handleCron() {
+    this.logger.log('Running scheduled job to sync inventory and menu availability...');
+    await this.syncAvailability();
   }
-}
 
+  async syncAvailability(): Promise<{ madeAvailable: number; madeUnavailable: number }> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+
+    try {
+      const itemsToMakeAvailable = await queryRunner.manager
+        .createQueryBuilder(MenuItem, 'menuItem')
+        .innerJoin('inventory', 'inv', 'inv.menu_item_id = menuItem.id')
+        .where('menuItem.is_available = :isAvailable', { isAvailable: false })
+        .andWhere('inv.stock_quantity > 0')
+        .getMany();
+
+      if (itemsToMakeAvailable.length > 0) {
+        const ids = itemsToMakeAvailable.map(i => i.id);
+        await queryRunner.manager.update(MenuItem, ids, { is_available: true });
+        this.logger.log(`Scheduled sync: Made ${ids.length} item(s) available.`);
+      }
+
+      const itemsToMakeUnavailable = await queryRunner.manager
+        .createQueryBuilder(MenuItem, 'menuItem')
+        .innerJoin('inventory', 'inv', 'inv.menu_item_id = menuItem.id')
+        .where('menuItem.is_available = :isAvailable', { isAvailable: true })
+        .andWhere('inv.stock_quantity <= 0')
+        .getMany();
+
+      if (itemsToMakeUnavailable.length > 0) {
+        const ids = itemsToMakeUnavailable.map(i => i.id);
+        await queryRunner.manager.update(MenuItem, ids, { is_available: false });
+        this.logger.log(`Scheduled sync: Made ${ids.length} item(s) unavailable.`);
+      }
+
+      return { madeAvailable: itemsToMakeAvailable.length, madeUnavailable: itemsToMakeUnavailable.length };
+    } catch (err) {
+      this.logger.error('Error during scheduled inventory sync:', err.stack || err);
+      return { madeAvailable: 0, madeUnavailable: 0 };
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  // ---------- Deduct stock for an order (internal) ----------
   async deductStockForOrder(items: OrderItemPayload[]): Promise<void> {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
@@ -84,7 +84,6 @@ async syncAvailability(): Promise<{ madeAvailable: number; madeUnavailable: numb
 
     try {
       for (const item of items) {
-        // CORRECTED: Use snake_case 'menu_item_id' to match the Inventory entity
         const inventory = await queryRunner.manager.findOne(Inventory, {
           where: { menu_item_id: item.menuItemId },
           lock: { mode: 'pessimistic_write' },
@@ -93,147 +92,201 @@ async syncAvailability(): Promise<{ madeAvailable: number; madeUnavailable: numb
         if (!inventory) {
           throw new NotFoundException(`Inventory for menu item ${item.menuItemId} not found.`);
         }
-        
-        // CORRECTED: Use snake_case 'stock_quantity' to match the Inventory entity
+
         if (inventory.stock_quantity < item.quantity) {
           throw new Error(`Insufficient stock for menu item ${item.menuItemId}.`);
         }
-        
-        // CORRECTED: Use snake_case 'stock_quantity'
+
         inventory.stock_quantity -= item.quantity;
-        
+
         const log = queryRunner.manager.create(InventoryLog, {
-            inventory: inventory,
-            change_type: InventoryChangeType.ORDER_DEDUCTION,
-            quantity_change: -item.quantity, 
+          inventory,
+          quantity_change: -item.quantity,
+          change_type: InventoryChangeType.ORDER_DEDUCTION,
         });
         await queryRunner.manager.save(log);
 
-        // CORRECTED: Use snake_case 'stock_quantity'
         if (inventory.stock_quantity <= 0) {
-          this.logger.warn(`Menu item ${item.menuItemId} is now out of stock. Setting as unavailable.`);
-          // This uses 'is_available' which correctly matches your MenuItem entity
-          await queryRunner.manager.update(MenuItem, 
-            { id: item.menuItemId }, 
-            { is_available: false }
-          );
+          await queryRunner.manager.update(MenuItem, { id: item.menuItemId }, { is_available: false });
         }
-        
+
         await queryRunner.manager.save(inventory);
       }
 
       await queryRunner.commitTransaction();
       this.logger.log(`Successfully deducted stock for ${items.length} items.`);
-
     } catch (err) {
       await queryRunner.rollbackTransaction();
-      this.logger.error('Failed to deduct stock for order. Transaction rolled back.', err.stack);
+      this.logger.error('Failed to deduct stock for order. Transaction rolled back.', err.stack || err);
       throw err;
     } finally {
       await queryRunner.release();
     }
   }
 
-  async getInventoryForRestaurant(restaurantId: string): Promise<Inventory[]> {
-    this.logger.log(`Fetching inventory for restaurant ID: ${restaurantId}`);
+  // ---------- Get inventory for a restaurant (owner-only) ----------
+  async getInventoryForRestaurant(restaurantId: string, userId: string): Promise<Inventory[]> {
+    // verify restaurant exists & ownership
+    const restaurant = await this.restaurantRepository.findOne({ where: { id: restaurantId } });
+    if (!restaurant) {
+      throw new NotFoundException(`Restaurant with id ${restaurantId} not found.`);
+    }
+    if (restaurant.owner_id !== userId) {
+      throw new ForbiddenException(`You do not belong to this restaurant (${restaurant.name}).`);
+    }
 
     const inventoryItems = await this.inventoryRepository.find({
-      where: {
-        // CORRECTED: Use snake_case 'restaurant_id' to match the Inventory entity
-        restaurant_id: restaurantId,
-      },
-      relations: {
-        // CORRECTED: Use snake_case 'menu_item' to match the relation name in the Inventory entity
-        menu_item: true,
-      },
-      order: {
-        // CORRECTED: Use snake_case 'menu_item' for ordering
-        menu_item: {
-            name: 'ASC'
+      where: { restaurant_id: restaurantId },
+      relations: { menu_item: true },
+      order: { menu_item: { name: 'ASC' } },
+    });
+
+    return inventoryItems || [];
+  }
+
+  // ---------- Helper: fetch menuItem -> category -> restaurant ----------
+  private async loadMenuItemWithRestaurant(queryRunnerOrManager: any, menuItemId: string): Promise<{ menuItem: MenuItem | null; restaurantId?: string; restaurantName?: string }> {
+    // use provided manager (queryRunner.manager) to stay within transaction
+    const menuItem = await queryRunnerOrManager.findOne(MenuItem, {
+      where: { id: menuItemId },
+      relations: ['category', 'category.restaurant'],
+    });
+
+    if (!menuItem) return { menuItem: null };
+
+    const restaurant = (menuItem.category && (menuItem.category as any).restaurant) ? (menuItem.category as any).restaurant : null;
+    return { menuItem, restaurantId: restaurant?.id, restaurantName: restaurant?.name };
+  }
+
+  // ---------- Manual stock update (owner-only; auto-create inventory if missing) ----------
+  async updateStockManually(menuItemId: string, newQuantity: number, userId: string): Promise<Inventory> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      // try find existing inventory (may be missing)
+      let inventory = await queryRunner.manager.findOne(Inventory, { where: { menu_item_id: menuItemId } });
+
+      if (!inventory) {
+        // Need to load menu item -> category -> restaurant to validate ownership and create inventory
+        const { menuItem, restaurantId, restaurantName } = await this.loadMenuItemWithRestaurant(queryRunner.manager, menuItemId);
+
+        if (!menuItem) {
+          throw new NotFoundException(`Menu item ${menuItemId} not found.`);
+        }
+        if (!restaurantId) {
+          throw new NotFoundException(`Menu item ${menuItemId} has no restaurant associated.`);
+        }
+        // ownership check
+        const restaurant = await this.restaurantRepository.findOne({ where: { id: restaurantId } });
+        if (!restaurant) throw new NotFoundException(`Restaurant ${restaurantId} not found.`);
+        if (restaurant.owner_id !== userId) {
+          throw new ForbiddenException(`You do not belong to this restaurant (${restaurant.name}) while updating menu item ${menuItemId}.`);
+        }
+
+        // create inventory row
+        inventory = queryRunner.manager.create(Inventory, {
+          menu_item_id: menuItemId,
+          restaurant_id: restaurantId,
+          stock_quantity: 0,
+        });
+        await queryRunner.manager.save(inventory);
+        this.logger.log(`Created inventory row for menu_item_id ${menuItemId}`);
+      } else {
+        // inventory exists — ensure the restaurant owning this inventory is owned by user
+        const inventoryRestaurant = await queryRunner.manager.findOne(Restaurant, { where: { id: inventory.restaurant_id } });
+        if (!inventoryRestaurant) throw new NotFoundException(`Restaurant ${inventory.restaurant_id} not found.`);
+        if (inventoryRestaurant.owner_id !== userId) {
+          throw new ForbiddenException(`You do not belong to this restaurant (${inventoryRestaurant.name}) while updating menu item ${menuItemId}.`);
         }
       }
-    });
 
-    if (!inventoryItems || inventoryItems.length === 0) {
-      this.logger.warn(`No inventory found for restaurant ID: ${restaurantId}`);
-      return [];
-    }
+      // apply update
+      const oldQuantity = inventory.stock_quantity;
+      const quantityChange = newQuantity - oldQuantity;
 
-    return inventoryItems;
-  }
+      if (quantityChange !== 0) {
+        inventory.stock_quantity = newQuantity;
 
-  async updateStockManually(menuItemId: string, newQuantity: number): Promise<Inventory> {
-  const queryRunner = this.dataSource.createQueryRunner();
-  await queryRunner.connect();
-  await queryRunner.startTransaction();
-
-  try {
-    const inventory = await queryRunner.manager.findOneOrFail(Inventory, {
-      where: { menu_item_id: menuItemId },
-    });
-
-    const oldQuantity = inventory.stock_quantity;
-    const quantityChange = newQuantity - oldQuantity;
-
-    // Only perform writes if the quantity has actually changed
-    if (quantityChange !== 0) {
-      inventory.stock_quantity = newQuantity;
-
-      // Log the manual change for audit purposes
-      const log = queryRunner.manager.create(InventoryLog, {
-        inventory: inventory,
-        quantity_change: quantityChange,
-        change_type: InventoryChangeType.MANUAL_UPDATE,
-        reason: 'Manual stock update by owner.', // Optional reason
-      });
-      
-      await queryRunner.manager.save(log);
-
-      // --- LOGIC TO UPDATE MENU AVAILABILITY ---
-      // If stock was 0 and is now positive, make it available
-      if (oldQuantity <= 0 && newQuantity > 0) {
-        await queryRunner.manager.update(MenuItem, { id: menuItemId }, { is_available: true });
-        this.logger.log(`Menu item ${menuItemId} is back in stock. Marking as available.`);
-      }
-      // If stock was positive and is now 0, make it unavailable
-      else if (oldQuantity > 0 && newQuantity <= 0) {
-        await queryRunner.manager.update(MenuItem, { id: menuItemId }, { is_available: false });
-        this.logger.log(`Menu item ${menuItemId} is now out of stock. Marking as unavailable.`);
-      }
-
-      await queryRunner.manager.save(inventory);
-    }
-
-    await queryRunner.commitTransaction();
-    this.logger.log(`Successfully updated stock for menu item ${menuItemId} to ${newQuantity}`);
-    return inventory;
-
-  } catch (err) {
-    await queryRunner.rollbackTransaction();
-    this.logger.error(`Failed to update stock for menu item ${menuItemId}. Transaction rolled back.`, err.stack);
-    // Re-throw specific errors if needed, e.g., NotFoundException
-    if (err.name === 'EntityNotFoundError') {
-        throw new NotFoundException(`Inventory for menu item ${menuItemId} not found.`);
-    }
-    throw err;
-  } finally {
-    await queryRunner.release();
-  }
-}
-
-async replenishStock(items: ReplenishItemDto[]): Promise<{ message: string; count: number }> {
-  const queryRunner = this.dataSource.createQueryRunner();
-  await queryRunner.connect();
-  await queryRunner.startTransaction();
-
-  try {
-    // Process all updates concurrently within the transaction
-    await Promise.all(
-      items.map(async (item) => {
-        const inventory = await queryRunner.manager.findOneOrFail(Inventory, {
-          where: { menu_item_id: item.menu_item_id },
+        const log = queryRunner.manager.create(InventoryLog, {
+          inventory,
+          quantity_change: quantityChange,
+          change_type: InventoryChangeType.MANUAL_UPDATE,
+          reason: 'Manual stock update by owner.',
         });
+        await queryRunner.manager.save(log);
 
+        // update menu availability
+        if (oldQuantity <= 0 && newQuantity > 0) {
+          await queryRunner.manager.update(MenuItem, { id: menuItemId }, { is_available: true });
+        } else if (oldQuantity > 0 && newQuantity <= 0) {
+          await queryRunner.manager.update(MenuItem, { id: menuItemId }, { is_available: false });
+        }
+
+        await queryRunner.manager.save(inventory);
+      }
+
+      await queryRunner.commitTransaction();
+      this.logger.log(`Successfully updated stock for menu item ${menuItemId} to ${newQuantity}`);
+      return inventory;
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      this.logger.error(`Failed to update stock for menu item ${menuItemId}. Transaction rolled back.`, err.stack || err);
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  // ---------- Replenish (bulk) ----------
+  async replenishStock(items: ReplenishItemDto[], userId: string): Promise<{ message: string; count: number }> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      for (const item of items) {
+        // find existing inventory
+        let inventory = await queryRunner.manager.findOne(Inventory, { where: { menu_item_id: item.menu_item_id } });
+
+        if (!inventory) {
+          // load menu item -> category -> restaurant for ownership validation
+          const { menuItem, restaurantId, restaurantName } = await this.loadMenuItemWithRestaurant(queryRunner.manager, item.menu_item_id);
+
+          if (!menuItem) {
+            throw new NotFoundException(`Menu item ${item.menu_item_id} not found.`);
+          }
+          if (!restaurantId) {
+            throw new NotFoundException(`Menu item ${item.menu_item_id} has no restaurant associated.`);
+          }
+
+          const restaurant = await this.restaurantRepository.findOne({ where: { id: restaurantId } });
+          if (!restaurant) {
+            throw new NotFoundException(`Restaurant ${restaurantId} not found.`);
+          }
+          if (restaurant.owner_id !== userId) {
+            throw new ForbiddenException(`You do not belong to this restaurant (${restaurant.name}) while replenishing menu item ${item.menu_item_id}.`);
+          }
+
+          // create inventory row
+          inventory = queryRunner.manager.create(Inventory, {
+            menu_item_id: item.menu_item_id,
+            restaurant_id: restaurantId,
+            stock_quantity: 0,
+          });
+          await queryRunner.manager.save(inventory);
+          this.logger.log(`Created inventory row for menu_item_id ${item.menu_item_id}`);
+        } else {
+          // inventory exists — verify owner of the restaurant attached to inventory
+          const inventoryRestaurant = await queryRunner.manager.findOne(Restaurant, { where: { id: inventory.restaurant_id } });
+          if (!inventoryRestaurant) throw new NotFoundException(`Restaurant ${inventory.restaurant_id} not found.`);
+          if (inventoryRestaurant.owner_id !== userId) {
+            throw new ForbiddenException(`You do not belong to this restaurant (${inventoryRestaurant.name}) while replenishing menu item ${item.menu_item_id}.`);
+          }
+        }
+
+        // apply the update
         const oldQuantity = inventory.stock_quantity;
         const newQuantity = item.stock_quantity;
         const quantityChange = newQuantity - oldQuantity;
@@ -242,37 +295,32 @@ async replenishStock(items: ReplenishItemDto[]): Promise<{ message: string; coun
           inventory.stock_quantity = newQuantity;
 
           const log = queryRunner.manager.create(InventoryLog, {
-            inventory: inventory,
+            inventory,
             quantity_change: quantityChange,
             change_type: InventoryChangeType.RESTOCK,
             reason: 'Bulk replenish operation.',
           });
           await queryRunner.manager.save(log);
 
-          // If item was out of stock and is now restocked, make it available
           if (oldQuantity <= 0 && newQuantity > 0) {
             await queryRunner.manager.update(MenuItem, { id: item.menu_item_id }, { is_available: true });
           }
 
           await queryRunner.manager.save(inventory);
         }
-      }),
-    );
+      }
 
-    await queryRunner.commitTransaction();
-    const successMessage = `Successfully replenished stock for ${items.length} item(s).`;
-    this.logger.log(successMessage);
-    return { message: successMessage, count: items.length };
-
-  } catch (err) {
-    await queryRunner.rollbackTransaction();
-    this.logger.error(`Failed to replenish stock. Transaction rolled back.`, err.stack);
-    if (err.name === 'EntityNotFoundError') {
-        throw new NotFoundException(`One or more inventory items were not found.`);
+      await queryRunner.commitTransaction();
+      const successMsg = `Successfully replenished stock for ${items.length} item(s).`;
+      this.logger.log(successMsg);
+      return { message: successMsg, count: items.length };
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      this.logger.error(`Failed to replenish stock. Transaction rolled back.`, err.stack || err);
+      throw err;
+    } finally {
+      await queryRunner.release();
     }
-    throw err;
-  } finally {
-    await queryRunner.release();
   }
 }
-}
+

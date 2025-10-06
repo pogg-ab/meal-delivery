@@ -18,7 +18,6 @@ export class MenuItemsService {
     private readonly inventoryRepository: Repository<Inventory>,
   ) {}
 
-  
 
 async create(ownerId: string, createDto: CreateMenuItemDto): Promise<MenuItem> {
   const category = await this.categoryRepository.findOne({

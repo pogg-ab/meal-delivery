@@ -43,4 +43,5 @@ export class MenuItem {
   
  @OneToOne(() => Inventory, (inventory) => inventory.menu_item) // Updated to match Inventory entity
   inventory: Inventory;
+  restaurant: any;
 }

@@ -68,3 +68,5 @@ created_at: Date;
 @UpdateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
 updated_at: Date;
 }
+
+export { Restaurant };

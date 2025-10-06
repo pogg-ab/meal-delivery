@@ -7,8 +7,8 @@ const SOCKETIO_PATH = "/socket.io";
 const WS_PORT = 4000;
 
 // configure the IDs you want the proxy to join
-const restaurantsToListen = ["038bb955-e3b4-4f69-a46d-3bd5020a7eda"];
-const ordersToListen = ["038bb955-e3b4-4f69-a46d-3bd5020a7eda"]; // add order ids like "order-123" if needed
+const restaurantsToListen = ["abfec637-5fdc-440c-9ba3-3dcecd1bd11e"];
+const ordersToListen = ["5a1e0f78-891a-4c10-87aa-c369aebc03b8"]; // add order ids like "order-123" if needed
 
 console.log("Proxy starting. Will connect to:", SOCKETIO_URL, "with path:", SOCKETIO_PATH);
 

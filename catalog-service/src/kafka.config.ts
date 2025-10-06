@@ -7,7 +7,7 @@ export const kafkaConfig: KafkaOptions = {
       brokers: [process.env.KAFKA_BROKER || 'localhost:9092'],
     },
     consumer: {
-      groupId: process.env.KAFKA_GROUP_ID || 'procurement-consumer',
+      groupId: process.env.KAFKA_GROUP_ID || 'catalog-consumer',
     },
   },
 }; 
