@@ -1,8 +1,6 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
 
-
 export type PaymentStatus = 'initiated' | 'paid' | 'failed' | 'refunded';
-
 
 @Entity({ name: 'payments' })
 export class Payment {

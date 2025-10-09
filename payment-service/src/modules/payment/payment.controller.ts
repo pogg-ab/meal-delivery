@@ -2,6 +2,7 @@ import { Controller, Post, Body, Headers, Req, Get, Param, UnauthorizedException
 import { ApiBearerAuth, ApiBody, ApiHeader, ApiOperation, ApiParam, ApiResponse } from '@nestjs/swagger';
 import { CreateSubaccountDto } from './dtos/create-subaccount.dto';
 import { RefundDto } from './dtos/refund.dto';
+import { PlatformAccountResponseDto } from './dtos/platform-account-response.dto';
 import { PaymentInitiateDto } from './dtos/payment-initiate.dto';
 import { PaymentInitiatedResponseDto } from './dtos/payment-initiated-response.dto';
 import { EventPattern, Payload } from '@nestjs/microservices';
@@ -64,7 +65,6 @@ if (secret !== process.env.SERVICE_AUTH_SECRET) throw new UnauthorizedException(
 return this.svc.refund(body);
 }
 
-
 // @Post('/internal/payments/initiate')
 // @ApiOperation({ summary: 'Simulate order.awaiting_payment (for testing via Swagger). Triggers payment initialization.' })
 // @ApiBody({ type: PaymentInitiateDto })
@@ -75,12 +75,38 @@ return this.svc.refund(body);
 // return { order_id: dto.order_id};
 // }
 
+@Post('/internal/payments/platform/subaccount')
+@Roles('platform_admin')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@ApiBearerAuth('access-token')
+@ApiOperation({ summary: 'Create or update the platform chapa subaccount (internal only)' })
+@ApiBody({ type: CreateSubaccountDto })
+async createPlatformSub(
+  @Body() body: CreateSubaccountDto,
+  @Headers('x-service-secret') secret?: string,
+) {
+  if (secret !== process.env.SERVICE_AUTH_SECRET) throw new UnauthorizedException();
+  return this.svc.createOrUpdatePlatformAccount(body);
+}
+
+// GET platform account
+@Get('/internal/payments/platform/subaccount')
+@Roles('platform_admin')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@ApiOperation({ summary: 'Get current platform chapa subaccount (internal)' })
+async getPlatformSub(@Headers('x-service-secret') secret?: string) {
+  if (secret !== process.env.SERVICE_AUTH_SECRET) throw new UnauthorizedException();
+  return this.svc.getPlatformAccount();
+}
+
+
 @EventPattern('order.awaiting_payment')
 async onOrderAwaitingPayment(@Payload() payload: any) {
 try {
 await this.svc.handleOrderAwaitingPayment(payload);
+console.log(payload);
 } catch (e) {
 console.error('Error handling order.awaiting_payment', e);
-}
-}
+  }
+ }
 }
