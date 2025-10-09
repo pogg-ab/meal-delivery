@@ -1,8 +1,7 @@
-import { Controller } from '@nestjs/common';
+import { Controller, Logger } from '@nestjs/common'; 
 import { EventPattern, Payload } from '@nestjs/microservices';
 import { InventoryService } from './inventory.service';
 
-// This defines the "contract" for the event payload
 interface OrderItemPayload {
   menuItemId: string;
   quantity: number;
@@ -15,11 +14,21 @@ interface OrderConfirmedPayload {
 
 @Controller()
 export class InventoryConsumer {
+  private readonly logger = new Logger(InventoryConsumer.name);
+
   constructor(private readonly inventoryService: InventoryService) {}
 
   @EventPattern('order.confirmed')
   async handleOrderConfirmed(@Payload() data: OrderConfirmedPayload) {
-    console.log(`Received order.confirmed event for order ID: ${data.orderId}`);
-    await this.inventoryService.deductStockForOrder(data.items);
+    this.logger.log(`Received order.confirmed event for order ID: ${data.orderId}`);
+    try {
+      await this.inventoryService.deductStockForOrder(data.items);
+      this.logger.log(`Successfully deducted stock for order ${data.orderId}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to process stock deduction for order ${data.orderId}. The event will be skipped.`,
+        error.stack,
+      );
+    }
   }
 }

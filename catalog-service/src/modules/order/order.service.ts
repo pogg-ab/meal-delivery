@@ -33,59 +33,80 @@ export class OrdersService {
    * Create order. Since inventory is NOT tracked (per your decision),
    * we only validate menu item availability (is_available) and snapshot prices/quantities.
    */
+  // In catalog-service/src/modules/orders/orders.service.ts
+
   async createOrder(customerId: string, dto: CreateOrderDto): Promise<Order> {
-    if (!dto.items || dto.items.length === 0) throw new BadRequestException('No items');
+    if (!dto.items || dto.items.length === 0) {
+      throw new BadRequestException('Order must contain at least one item.');
+    }
 
     return await this.dataSource.transaction(async (manager) => {
+      // Get repositories from the transaction manager
       const orderRepo = manager.getRepository(Order);
       const orderItemRepo = manager.getRepository(OrderItem);
       const menuRepo = manager.getRepository(MenuItem);
       const orderEventRepo = manager.getRepository(OrderEvent);
+      const restaurantRepo = manager.getRepository(Restaurant); // <-- Added
+
+      // --- START: MODIFICATION FOR OWNER NOTIFICATION ---
+      // 1. Find the restaurant to get the owner's ID for the Kafka event.
+      const restaurant = await restaurantRepo.findOne({ where: { id: dto.restaurant_id } });
+      if (!restaurant) {
+        throw new NotFoundException(`Restaurant with ID ${dto.restaurant_id} not found.`);
+      }
+      const ownerId = restaurant.owner_id;
+      // --- END: MODIFICATION FOR OWNER NOTIFICATION ---
 
       let total = 0;
+      type PreparedItem = { 
+        menu_id: string; 
+        name: string; 
+        unit_price: number; 
+        qty: number; 
+        subtotal: number; 
+        instructions?: string 
+      };
+      const preparedItems: PreparedItem[] = [];
 
-      type Prepared = { menu_id: string; name: string; unit_price: number; qty: number; subtotal: number; instructions?: string };
-      const preparedItems: Prepared[] = [];
-
-      // Validate menu items (existence and availability) and compute totals. No inventory touched.
+      // Validate all menu items and compute totals.
       for (const it of dto.items) {
-        const menu = await menuRepo.findOne({ where: { id: it.menu_item_id } });
-        if (!menu) throw new NotFoundException(`Menu item not found: ${it.menu_item_id}`);
-
-        if (!menu.is_available) {
-          throw new BadRequestException(`Item not available: ${menu.name}`);
+        const menuItem = await menuRepo.findOne({ where: { id: it.menu_item_id } });
+        if (!menuItem) {
+          throw new NotFoundException(`Menu item not found: ${it.menu_item_id}`);
+        }
+        if (!menuItem.is_available) {
+          throw new BadRequestException(`Item not available: ${menuItem.name}`);
         }
 
-        const qty = Number(it.quantity ?? 1);
-        const subtotal = Number(menu.price) * qty;
+        const quantity = Number(it.quantity ?? 1);
+        const subtotal = Number(menuItem.price) * quantity;
         total += subtotal;
 
         preparedItems.push({
-          menu_id: menu.id,
-          name: menu.name,
-          unit_price: Number(menu.price),
-          qty,
+          menu_id: menuItem.id,
+          name: menuItem.name,
+          unit_price: Number(menuItem.price),
+          qty: quantity,
           subtotal,
-          instructions: it.instructions ?? undefined,
+          instructions: it.instructions,
         });
       }
 
-      // Create order snapshot
+      // Create the main order record.
       const orderData: DeepPartial<Order> = {
         customer_id: customerId,
         restaurant_id: dto.restaurant_id,
         total_amount: total,
         currency: dto.currency ?? 'USD',
-        instructions: dto.instructions ?? undefined,
+        instructions: dto.instructions,
         is_delivery: !!dto.is_delivery,
         status: OrderStatus.PENDING,
         payment_status: PaymentStatus.NONE,
       };
-
       const orderEntity = orderRepo.create(orderData);
       const savedOrder = await orderRepo.save(orderEntity);
 
-      // Persist order items (snapshots)
+      // Create the associated order item records.
       for (const p of preparedItems) {
         const itemData: DeepPartial<OrderItem> = {
           order_id: savedOrder.id,
@@ -94,13 +115,13 @@ export class OrdersService {
           unit_price: p.unit_price,
           quantity: p.qty,
           subtotal: p.subtotal,
-          instructions: p.instructions ?? undefined,
+          instructions: p.instructions,
         };
         const itemEntity = orderItemRepo.create(itemData as any);
         await orderItemRepo.save(itemEntity);
       }
 
-      // record event (ORDER_CREATED). actor_id exists (customerId) and order_id exists
+      // Record the 'ORDER_CREATED' event for auditing.
       await orderEventRepo.save(
         orderEventRepo.create({
           order_id: savedOrder.id,
@@ -110,14 +131,26 @@ export class OrdersService {
         } as DeepPartial<OrderEvent>),
       );
 
+      // Fetch the full order with its items to return.
       const fullOrder = await orderRepo.findOne({ where: { id: savedOrder.id }, relations: ['items'] });
-      if (!fullOrder) throw new NotFoundException('Order not found after creation');
+      if (!fullOrder) {
+        throw new NotFoundException('Order not found after creation');
+      }
 
-      // notify via websocket and kafka
+      // Notify connected clients via WebSocket.
       this.gateway.emitOrderCreated(fullOrder);
 
+      // Publish the enriched event to Kafka for other microservices.
       try {
-        await this.kafka.emit('order.created', fullOrder);
+        // --- START: MODIFICATION FOR OWNER NOTIFICATION ---
+        // 2. Create an enriched payload that includes the ownerId.
+        const eventPayload = {
+          ...fullOrder,
+          ownerId: ownerId, 
+        };
+        await this.kafka.emit('order.created', eventPayload);
+        this.logger.log(`Emitted order.created event for order ${fullOrder.id} to owner ${ownerId}`);
+        // --- END: MODIFICATION FOR OWNER NOTIFICATION ---
       } catch (e) {
         this.logger.warn('Kafka emit failed for order.created', e as any);
       }
@@ -157,15 +190,17 @@ async ownerResponse(ownerId: string, orderId: string, accepted: boolean, reason?
 
   if (accepted) {
     // This logic now only runs ONCE, when the order is accepted from a PENDING state.
-    const inventoryPayload = {
+    const confirmedOrderPayload = {
       orderId: order.id,
-      items: order.items.map(item => ({
+      userId: order.customer_id, // For notification-service
+      restaurantName: order.restaurant.name, // For notification-service
+      items: order.items.map(item => ({ // For inventory-service
         menuItemId: item.menu_item_id,
         quantity: item.quantity,
       })),
     };
     try {
-      await this.kafka.emit('order.confirmed', inventoryPayload);
+      await this.kafka.emit('order.confirmed', confirmedOrderPayload);
       this.logger.log(`Published order.confirmed event for order ${order.id}`);
     } catch (e) {
       this.logger.warn('Kafka emit failed for order.confirmed', e as any);
