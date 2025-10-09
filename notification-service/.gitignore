@@ -29,3 +29,6 @@ coverage/
 
 # Docker
 *.local 
+
+# Ignore all firebase credentials files
+**/firebase-credentials.json
