@@ -6,7 +6,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { MicroserviceOptions } from '@nestjs/microservices';
-// import { kafkaConfig } from './kafka.config';
+import { kafkaConfig } from './kafka.config';
 import * as bodyParser from 'body-parser';
 
 // Polyfill global crypto if needed - This part is fine.
@@ -61,7 +61,7 @@ async function bootstrap() {
   }
   
   // Connect and start the Kafka microservice listener
-  // app.connectMicroservice<MicroserviceOptions>(kafkaConfig);
+  app.connectMicroservice<MicroserviceOptions>(kafkaConfig);
   await app.startAllMicroservices();
 
   // Start the HTTP server
