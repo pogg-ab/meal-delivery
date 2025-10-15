@@ -8,6 +8,7 @@ import { MenuItem } from '../../entities/menu-item.entity';
 import { InventoryController } from './inventory.controller';
 import { Restaurant } from 'src/entities/restaurant.entity';
 import { MenuCategory } from 'src/entities/menu-category.entity';
+import { KafkaProvider } from 'src/providers/kafka.provider';
 
 @Module({
   imports: [
@@ -16,10 +17,11 @@ import { MenuCategory } from 'src/entities/menu-category.entity';
       InventoryLog,
       MenuItem,
       Restaurant,
-      MenuCategory
+      MenuCategory,
+      
     ]),
   ],
-  providers: [InventoryService],
+  providers: [InventoryService, KafkaProvider,],
   controllers: [InventoryConsumer, InventoryController], 
 })
 export class InventoryModule {}

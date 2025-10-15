@@ -30,7 +30,7 @@ import { InventoryModule } from './modules/inventory/inventory.module';
         database: cfg.get('POSTGRES_DB'),
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
         synchronize: false,
-        migrationsRun: true,
+        migrationsRun: false,
         migrations: [__dirname + '/migrations/*{.ts,.js}'],
       }),
     }),
