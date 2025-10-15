@@ -35,4 +35,5 @@ created_at: Date;
 
 @UpdateDateColumn({ type: 'timestamp' })
 updated_at: Date;
+  paid_at: Date;
 }

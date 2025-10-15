@@ -40,6 +40,7 @@ export class AuthController {
 @ApiOkResponse({ type: LoginResponseDto })
 async login(@Body() dto: LoginDto, @Req() req: Request): Promise<LoginResponseDto> {
   const user = await this.authService.validateUserCredentials(dto.email, dto.password);
+  console.log(user);
 
   const userAgent = Array.isArray(req.headers['user-agent'])
     ? req.headers['user-agent'][0]

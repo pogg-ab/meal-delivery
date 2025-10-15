@@ -12,6 +12,8 @@ import { Restaurant } from '../../entities/restaurant.entity';
 import { OrderGateway } from '../../gateways/order.gateway';
 import { KafkaProvider } from 'src/providers/kafka.provider';
 import { CreateOrderDto } from './dtos/create-order.dto';
+import { OrdersPickupService } from './order-pickup.service'; 
+import { OrderPickup } from '../../entities/order-pickup.entity';
 import { CancelOrderDto } from './dtos/cancel-order.dto';
 import { OwnerPreparingDto } from './dtos/owner-preparing.dto';
 
@@ -27,15 +29,10 @@ export class OrdersService {
     private readonly dataSource: DataSource,
     private readonly gateway: OrderGateway,
     private readonly kafka: KafkaProvider,
+    private readonly pickupService: OrdersPickupService,
   ) {}
 
-  /**
-   * Create order. Since inventory is NOT tracked (per your decision),
-   * we only validate menu item availability (is_available) and snapshot prices/quantities.
-   */
-  // In catalog-service/src/modules/orders/orders.service.ts
-
-  async createOrder(customerId: string, dto: CreateOrderDto): Promise<Order> {
+  async createOrder(customerId: string, username: string, phone: string, dto: CreateOrderDto): Promise<Order> {
     if (!dto.items || dto.items.length === 0) {
       throw new BadRequestException('Order must contain at least one item.');
     }
@@ -48,14 +45,11 @@ export class OrdersService {
       const orderEventRepo = manager.getRepository(OrderEvent);
       const restaurantRepo = manager.getRepository(Restaurant); // <-- Added
 
-      // --- START: MODIFICATION FOR OWNER NOTIFICATION ---
-      // 1. Find the restaurant to get the owner's ID for the Kafka event.
       const restaurant = await restaurantRepo.findOne({ where: { id: dto.restaurant_id } });
       if (!restaurant) {
         throw new NotFoundException(`Restaurant with ID ${dto.restaurant_id} not found.`);
       }
       const ownerId = restaurant.owner_id;
-      // --- END: MODIFICATION FOR OWNER NOTIFICATION ---
 
       let total = 0;
       type PreparedItem = { 
@@ -68,7 +62,6 @@ export class OrdersService {
       };
       const preparedItems: PreparedItem[] = [];
 
-      // Validate all menu items and compute totals.
       for (const it of dto.items) {
         const menuItem = await menuRepo.findOne({ where: { id: it.menu_item_id } });
         if (!menuItem) {
@@ -95,6 +88,8 @@ export class OrdersService {
       // Create the main order record.
       const orderData: DeepPartial<Order> = {
         customer_id: customerId,
+        customer_name: username,
+        customer_phone: phone,
         restaurant_id: dto.restaurant_id,
         total_amount: total,
         currency: dto.currency ?? 'USD',
@@ -142,15 +137,12 @@ export class OrdersService {
 
       // Publish the enriched event to Kafka for other microservices.
       try {
-        // --- START: MODIFICATION FOR OWNER NOTIFICATION ---
-        // 2. Create an enriched payload that includes the ownerId.
         const eventPayload = {
           ...fullOrder,
           ownerId: ownerId, 
         };
         await this.kafka.emit('order.created', eventPayload);
         this.logger.log(`Emitted order.created event for order ${fullOrder.id} to owner ${ownerId}`);
-        // --- END: MODIFICATION FOR OWNER NOTIFICATION ---
       } catch (e) {
         this.logger.warn('Kafka emit failed for order.created', e as any);
       }
@@ -167,12 +159,9 @@ async ownerResponse(ownerId: string, orderId: string, accepted: boolean, reason?
   if (!order) throw new NotFoundException('Order not found');
   if (!order.restaurant || order.restaurant.owner_id !== ownerId) throw new BadRequestException('Not authorized');
 
-  // --- THIS IS THE CRITICAL FIX ---
-  // 1. Add a state check. Only allow this action if the order is PENDING.
   if (order.status !== OrderStatus.PENDING) {
     throw new BadRequestException('This order has already been processed and cannot be changed.');
   }
-  // --- END OF FIX ---
 
   order.status = accepted ? OrderStatus.ACCEPTED : OrderStatus.DECLINED;
   await this.orderRepo.save(order);
@@ -180,6 +169,7 @@ async ownerResponse(ownerId: string, orderId: string, accepted: boolean, reason?
   await this.orderRepo.manager.getRepository(OrderEvent).save(
     this.orderRepo.manager.getRepository(OrderEvent).create({
       order_id: order.id,
+      customer_name: order.customer_name,
       actor_id: ownerId,
       action: accepted ? 'OWNER_ACCEPTED' : 'OWNER_DECLINED',
       meta: reason ? { reason } : undefined,
@@ -209,6 +199,7 @@ async ownerResponse(ownerId: string, orderId: string, accepted: boolean, reason?
     // 2. Ask Payment service to start payment flow (your existing logic)
     const paymentPayload = {
       order_id: order.id,
+      customer_name: order.customer_name,
       amount: Number(order.total_amount),
       currency: order.currency,
       customer_id: order.customer_id,
@@ -228,62 +219,219 @@ async ownerResponse(ownerId: string, orderId: string, accepted: boolean, reason?
   return { ok: true };
 }
 
-  /**
-   * Handle payment result events (payment.success / payment.failed).
-   * Since items are not inventory-tracked, we simply mark order as paid or failed and emit order.paid
-   * (so other services/UI can react).
-   */
+  // async handlePaymentResult(payload: any) {
+  //   console.log('payload emmitted from PS: ', payload);
+  //   this.logger.log(`handlePaymentResult: ${JSON.stringify(payload)}`);
+  //   const order = await this.orderRepo.findOne({ where: { id: payload.order_id }, relations: ['items', 'restaurant'] });
+  //   if (!order) {
+  //     this.logger.warn(`Order not found for payment result: ${payload.order_id}`);
+  //     return;
+  //   }
+
+  //   if (payload?.payment_data?.status === 'success' || payload?.payment_data?.status === 'paid') {
+  //     order.payment_status = PaymentStatus.PAID;
+  //     order.payment_reference = payload?.payment_data?.data?.reference;
+  //     order.paid_at = payload?.payment_data?.created_at ? new Date(payload?.payment_data?.created_at) : new Date();
+
+  //     // advance order state
+  //     order.status = OrderStatus.PAID;
+  //     await this.orderRepo.save(order);
+
+  //     await this.orderRepo.manager.getRepository(OrderEvent).save(
+  //       this.orderRepo.manager.getRepository(OrderEvent).create({
+  //         order_id: order.id,
+  //         action: 'PAYMENT_CONFIRMED',
+  //         meta: payload,
+  //       } as DeepPartial<OrderEvent>),
+  //     );
+
+  //     // NO inventory deduction emitted
+  //     try {
+  //       await this.kafka.emit('order.paid', { order_id: order.id, paid_at: order.paid_at });
+  //     } catch (e) {
+  //       this.logger.warn('Kafka emit failed for order.paid', e as any);
+  //     }
+
+  //     this.gateway.emitOrderUpdated(order);
+  //     return;
+  //   }
+
+  //   // payment failed
+  //   order.payment_status = PaymentStatus.FAILED;
+  //   order.status = OrderStatus.DECLINED;
+  //   await this.orderRepo.save(order);
+
+  //   await this.orderRepo.manager.getRepository(OrderEvent).save(
+  //     this.orderRepo.manager.getRepository(OrderEvent).create({
+  //       order_id: order.id,
+  //       action: 'PAYMENT_FAILED',
+  //       meta: payload,
+  //     } as DeepPartial<OrderEvent>),
+  //   );
+
+  //   this.gateway.emitOrderUpdated(order);
+  // }
+
+
   async handlePaymentResult(payload: any) {
-    this.logger.log(`handlePaymentResult: ${JSON.stringify(payload)}`);
-    const order = await this.orderRepo.findOne({ where: { id: payload.order_id }, relations: ['items', 'restaurant'] });
-    if (!order) {
-      this.logger.warn(`Order not found for payment result: ${payload.order_id}`);
-      return;
-    }
+  this.logger.log(`handlePaymentResult: ${JSON.stringify(payload)}`);
+  const order = await this.orderRepo.findOne({
+    where: { id: payload.order_id },
+    relations: ['items', 'restaurant'],
+  });
 
-    if (payload.status === 'SUCCESS' || payload.status === 'PAID') {
-      order.payment_status = PaymentStatus.PAID;
-      order.payment_reference = payload.reference ?? payload.payment_reference ?? null;
-      order.paid_at = payload.paid_at ? new Date(payload.paid_at) : new Date();
+  if (!order) {
+    this.logger.warn(`Order not found for payment result: ${payload.order_id}`);
+    return;
+  }
 
-      // advance order state
-      order.status = OrderStatus.PAID;
-      await this.orderRepo.save(order);
+  // Normalize detection of success: support multiple shapes
+  const payStatus =
+    payload?.payment_data?.status ??
+    payload?.payment_data?.data?.status ??
+    payload?.status ??
+    payload?.payment_status ??
+    null;
 
+  const isSuccess =
+    typeof payStatus === 'string' &&
+    ['success', 'paid', 'PAID', 'SUCCESS'].includes(String(payStatus).toLowerCase());
+
+  if (isSuccess) {
+    // --- Update order payment fields and status ---
+    order.payment_status = PaymentStatus.PAID;
+    order.payment_reference =
+      payload?.payment_data?.data?.reference ??
+      payload?.payment_data?.data?.transaction_reference ??
+      payload?.payment_reference ??
+      payload?.reference ??
+      null;
+
+    order.paid_at =
+      payload?.payment_data?.data?.paid_at
+        ? new Date(payload.payment_data.data.paid_at)
+        : payload?.payment_data?.created_at
+        ? new Date(payload.payment_data.created_at)
+        : new Date();
+
+    order.status = OrderStatus.PAID;
+    await this.orderRepo.save(order);
+
+    // persist PAYMENT_CONFIRMED event
+    try {
       await this.orderRepo.manager.getRepository(OrderEvent).save(
         this.orderRepo.manager.getRepository(OrderEvent).create({
           order_id: order.id,
           action: 'PAYMENT_CONFIRMED',
           meta: payload,
-        } as DeepPartial<OrderEvent>),
+        } as Partial<OrderEvent>),
       );
-
-      // NO inventory deduction emitted
-      try {
-        await this.kafka.emit('order.paid', { order_id: order.id, paid_at: order.paid_at });
-      } catch (e) {
-        this.logger.warn('Kafka emit failed for order.paid', e as any);
-      }
-
-      this.gateway.emitOrderUpdated(order);
-      return;
+    } catch (e) {
+      this.logger.warn('Failed saving PAYMENT_CONFIRMED event', e?.message ?? e);
     }
 
-    // payment failed
-    order.payment_status = PaymentStatus.FAILED;
-    order.status = OrderStatus.DECLINED;
-    await this.orderRepo.save(order);
+    // emit order.paid to Kafka
+    try {
+      await this.kafka.emit('order.paid', { order_id: order.id, paid_at: order.paid_at });
+    } catch (e) {
+      this.logger.warn('Kafka emit failed for order.paid', e as any);
+    }
 
+    // push websocket update
+    try {
+      this.gateway.emitOrderUpdated(order);
+    } catch (e) {
+      this.logger.warn('Gateway emitOrderUpdated failed', e as any);
+    }
+
+    // --- Issue pickup (idempotent) and notify parties ---
+    try {
+  // Issue pickup; the service may return a single object or an array
+  let pickupRes: OrderPickup | OrderPickup[] | null = await this.pickupService.issuePickupForOrder(order.id, 30);
+
+  // normalize to single OrderPickup
+  let pickup: OrderPickup | null = null;
+  if (!pickupRes) {
+    pickup = null;
+  } else if (Array.isArray(pickupRes)) {
+    pickup = pickupRes.length > 0 ? (pickupRes[0] as OrderPickup) : null;
+  } else {
+    pickup = pickupRes as OrderPickup;
+  }
+
+  if (!pickup) {
+    this.logger.warn('Pickup issuance returned no record', { orderId: order.id, pickupRes });
+  } else {
+    // Normalize to undefined (not null) to match gateway/Kafka types
+    const pickupToken: string | undefined = pickup.pickup_token ?? undefined;
+    const pickupCodePrimitive: string | number | undefined =
+      pickup.pickup_code_hash === null || pickup.pickup_code_hash === undefined ? undefined : String((pickup.pickup_code_hash as any));
+    const expiresAt: Date | string | undefined = pickup.expires_at ?? undefined;
+
+    // Emit gateway events - pass only primitives (undefined if missing)
+    try {
+      this.gateway.emitPickupCreated(order, {
+        pickup_token: pickupToken,
+        pickup_code: pickupCodePrimitive,
+        expires_at: expiresAt,
+      });
+    } catch (gwErr) {
+      this.logger.warn('Gateway emitPickupCreated failed', gwErr as any);
+    }
+
+    // kafka event: include masked code (maskPickupCode accepts string|number|null)
+    try {
+      const masked = this.maskPickupCode(pickupCodePrimitive ?? null); // mask util accepts null
+      await this.kafka.emit('order.pickup_created', {
+        order_id: order.id,
+        pickup_id: pickup.id,
+        pickup_token: pickupToken,            // undefined if missing
+        pickup_code_masked: masked,
+        expires_at: expiresAt,
+      });
+    } catch (kErr) {
+      this.logger.warn('Failed emitting order.pickup_created', kErr as any);
+      }
+     }
+   } catch (pickupErr) {
+    this.logger.warn('Failed to issue pickup after payment', pickupErr?.message ?? pickupErr);
+  }
+    return;
+  }
+
+  // --- Payment failed path ---
+  order.payment_status = PaymentStatus.FAILED;
+  order.status = OrderStatus.DECLINED;
+  await this.orderRepo.save(order);
+
+  try {
     await this.orderRepo.manager.getRepository(OrderEvent).save(
       this.orderRepo.manager.getRepository(OrderEvent).create({
         order_id: order.id,
         action: 'PAYMENT_FAILED',
         meta: payload,
-      } as DeepPartial<OrderEvent>),
+      } as Partial<OrderEvent>),
     );
-
-    this.gateway.emitOrderUpdated(order);
+  } catch (e) {
+    this.logger.warn('Failed saving PAYMENT_FAILED event', e?.message ?? e);
   }
+
+  try {
+    this.gateway.emitOrderUpdated(order);
+  } catch (e) {
+    this.logger.warn('Gateway emitOrderUpdated failed', e as any);
+  }
+
+  return;
+}
+
+// ensure the helper signature accepts string|number|null
+private maskPickupCode(code?: string | number | null): string | null {
+  if (code === null || code === undefined) return null;
+  const s = String(code);
+  if (s.length <= 4) return '*'.repeat(Math.max(0, s.length - 1)) + s.slice(-1);
+  return s.replace(/\d(?=\d{2})/g, '*'); // show last 2 digits
+}
 
   /**
    * Customer marks "coming".
@@ -347,14 +495,13 @@ async getOrdersByRestaurant(ownerId: string, restaurantId: string, limit = 50, o
   });
   return orders;
  }
+
   async toggleMenuAvailability(ownerId: string, restaurantId: string, menuItemId: string, is_available: boolean) {
     // verify restaurant ownership
     const restaurant = await this.restaurantRepo.findOne({ where: { id: restaurantId } });
     if (!restaurant) throw new NotFoundException('Restaurant not found');
     if (restaurant.owner_id !== ownerId) throw new BadRequestException('Not authorized');
 
-    // verify menu item belongs to restaurant.
-    // menu items belong to a category which belongs to a restaurant.
     const menu = await this.menuItemRepo.findOne({
       where: { id: menuItemId },
       relations: ['category', 'category.restaurant'],
@@ -413,7 +560,6 @@ action: 'OWNER_PREPARING',
 meta: note ? { note } : undefined,
 } as DeepPartial<OrderEvent>));
 
-
 // emit after commit
 return order;
 }).then(async (committedOrder) => {
@@ -427,7 +573,6 @@ this.logger.warn('Kafka emit failed for order.preparing', e as any);
 return { ok: true };
 });
 }
-
 
 async cancelOrder(customerId: string, orderId: string, reason?: string) {
 return await this.dataSource.transaction(async (manager) => {

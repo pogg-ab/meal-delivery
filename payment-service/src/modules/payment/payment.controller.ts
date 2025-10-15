@@ -20,6 +20,7 @@ constructor(private readonly svc: PaymentsService) {}
 @ApiHeader({ name: 'x-chapa-signature', description: 'HMAC SHA256 signature' })
 async chapaWebhook(@Req() req: any, @Headers('x-chapa-signature') signature?: string) {
 const raw = req.rawBody as Buffer;
+console.log(raw, signature);
 await this.svc.handleChapaWebhook(raw, signature);
 return { ok: true };
 }

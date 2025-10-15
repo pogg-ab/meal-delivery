@@ -61,8 +61,8 @@ export class Restaurant {
     scale: 2,
     default: 0,
   })
-  average_rating: number;
 
+  average_rating: number;
 
   @Column({ type: 'integer', default: 0 })
   ratings_count: number;

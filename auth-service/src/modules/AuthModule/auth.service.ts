@@ -191,84 +191,9 @@ export class AuthService {
     return user;
   }
 
-// async login(user: User, deviceInfo: string, ip: string, remember = false) {
-//   const roles = (user.roles ?? []).map((ur) => ur.role?.name).filter(Boolean) as string[];
-//   let permissions = (user.roles ?? [])
-//     .flatMap((ur) => ur.role?.rolePermissions ?? [])
-//     .map((rp) => rp.permission?.name)
-//     .filter(Boolean) as string[];
-
-//   if (!permissions || permissions.length === 0) {
-//     try {
-//       const rows = await this.userRepo.manager
-//         .createQueryBuilder()
-//         .select('p.name', 'name')
-//         .from('role_permissions', 'rp')
-//         .innerJoin('permissions', 'p', 'p.permission_id = rp.permission_id')
-//         .innerJoin('roles', 'r', 'r.role_id = rp.role_id')
-//         .innerJoin('user_roles', 'ur', 'ur.role_id = r.role_id')
-//         .where('ur.user_id = :uid', { uid: user.user_id })
-//         .distinct(true)
-//         .getRawMany();
-//       permissions = Array.from(new Set(rows.map((r: any) => r.name).filter(Boolean)));
-//     } catch (err) {
-//       this.logger.warn('Permission fallback query failed', err as any);
-//       permissions = permissions ?? [];
-//     }
-//   }
-
-//   const uniqueRoles = Array.from(new Set(roles));
-//   const uniquePermissions = Array.from(new Set(permissions));
-
-//   const payloadForAccess = {
-//     sub: user.user_id,
-//     email: user.email,
-//     roles: uniqueRoles,
-//     permissions: uniquePermissions,
-//   };
-
-//   // Access token (short-lived)
-//   const accessExpiry = process.env.JWT_ACCESS_EXPIRES ?? '1h';
-//   const accessToken = this.jwtService.sign(payloadForAccess, { expiresIn: accessExpiry });
-//   const refreshDays = remember ? Number(process.env.JWT_REMEMBER_DAYS ?? 30) : Number(process.env.JWT_REFRESH_DAYS ?? 7);
-//   const refreshExpiry = `${refreshDays}d`;
-//   const expiresAt = new Date(Date.now() + refreshDays * 24 * 60 * 60 * 1000);
-
-//   const tokenRecord = this.tokenRepo.create({
-//     user,
-//     token_hash: '', // will set after signing
-//     expires_at: expiresAt,
-//     revoked: false,
-//   } as Partial<RefreshToken>);
-
-//   const savedToken = await this.tokenRepo.save(tokenRecord);
-
-//   // 3) sign refresh token including tid claim (token id)
-//   const refreshPayload = {
-//     sub: user.user_id,
-//     tid: savedToken.id,
-//   };
-//   const refreshTokenPlain = this.jwtService.sign(refreshPayload, { expiresIn: refreshExpiry });
-
-//   // 4) hash and persist refresh token
-//   const hash = await bcrypt.hash(refreshTokenPlain, 10);
-//   savedToken.token_hash = hash;
-//   await this.tokenRepo.save(savedToken);
-
-//   // return tokens + meta
-//   return {
-//     accessToken,
-//     refreshToken: refreshTokenPlain,
-//     roles: uniqueRoles,
-//     permissions: uniquePermissions,
-//     token_id: savedToken.id,
-//     expires_at: expiresAt,
-//     remember,
-//   };
-// }
-
 async login(user: User, deviceInfo: string, ip: string, remember = false) {
   const roles = (user.roles ?? []).map((ur) => ur.role?.name).filter(Boolean) as string[];
+  console.log(user);
   let permissions = (user.roles ?? [])
     .flatMap((ur) => ur.role?.rolePermissions ?? [])
     .map((rp) => rp.permission?.name)
@@ -323,6 +248,8 @@ try {
   const payloadForAccess: any = {
     sub: user.user_id,
     email: user.email,
+    username: user.username,
+    phone: user.phone,
     roles: uniqueRoles,
     permissions: uniquePermissions,
   };
@@ -333,7 +260,7 @@ try {
   }
 
   // Access token (short-lived)
-  const accessExpiry = process.env.JWT_ACCESS_EXPIRES ?? '1h';
+  const accessExpiry = process.env.JWT_ACCESS_EXPIRES ?? '24h';
   const accessToken = this.jwtService.sign(payloadForAccess, { expiresIn: accessExpiry });
   const refreshDays = remember ? Number(process.env.JWT_REMEMBER_DAYS ?? 30) : Number(process.env.JWT_REFRESH_DAYS ?? 7);
   const refreshExpiry = `${refreshDays}d`;

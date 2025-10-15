@@ -19,9 +19,14 @@ export class Order {
 @PrimaryGeneratedColumn('uuid')
 id: string;
 
-// store only the id extracted from JWT
 @Column({ type: 'uuid' })
 customer_id: string;
+
+@Column({ type: 'varchar', length: 255, nullable: true })
+customer_name?: string | null;
+
+@Column({ type: 'varchar', length: 50, nullable: true })
+customer_phone?: string | null;
 
 @Column({ type: 'uuid' })
 restaurant_id: string;
