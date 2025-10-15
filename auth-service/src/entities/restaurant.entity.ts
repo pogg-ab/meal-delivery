@@ -7,6 +7,7 @@ import {
   OneToMany,
   OneToOne,
   JoinColumn,
+  ManyToOne,
 } from 'typeorm';
 import { User } from './User.entity';
 import { Address } from './address.entity';
@@ -75,7 +76,7 @@ export class Restaurant {
 
   // --- Relationships ---
 
-  @OneToOne(() => User)
+  @ManyToOne(() => User)
   @JoinColumn({ name: 'owner_id' })
   owner: User;
 
