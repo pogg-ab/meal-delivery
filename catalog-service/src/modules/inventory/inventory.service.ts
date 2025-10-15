@@ -1,5 +1,5 @@
 
-import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ForbiddenException, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Inventory } from '../../entities/inventory.entity';
@@ -9,6 +9,7 @@ import { MenuCategory } from '../../entities/menu-category.entity';
 import { Restaurant } from '../../entities/restaurant.entity';
 import { ReplenishItemDto } from './dto/replenish-item.dto';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { KafkaProvider } from 'src/providers/kafka.provider';
 
 // Order deduction payload
 interface OrderItemPayload {
@@ -27,6 +28,7 @@ export class InventoryService {
     @InjectRepository(MenuCategory) private readonly categoryRepository: Repository<MenuCategory>,
     @InjectRepository(Restaurant) private readonly restaurantRepository: Repository<Restaurant>,
     @InjectRepository(InventoryLog) private readonly inventoryLogRepository: Repository<InventoryLog>,
+    private readonly kafkaClient: KafkaProvider,
   ) {}
 
   // ---------- Cron: sync availability ----------
@@ -35,6 +37,45 @@ export class InventoryService {
     this.logger.log('Running scheduled job to sync inventory and menu availability...');
     await this.syncAvailability();
   }
+
+  @Cron(CronExpression.EVERY_10_MINUTES)
+  async handleLowStockCheck() {
+    this.logger.log('Running scheduled job to check for low-stock items...');
+
+    const lowStockItems = await this.inventoryRepository
+      .createQueryBuilder('inventory')
+      .leftJoinAndSelect('inventory.menu_item', 'menuItem')
+      .leftJoinAndSelect('inventory.restaurant', 'restaurant') // <-- JOIN restaurant to get owner_id
+      .where('inventory.stock_quantity <= inventory.reorder_level')
+      // Optional but recommended: Add a flag to avoid spamming notifications
+      // .andWhere('inventory.low_stock_notified = false') 
+      .getMany();
+
+    if (lowStockItems.length === 0) {
+      this.logger.log('No low-stock items found.');
+      return;
+    }
+
+    this.logger.log(`Found ${lowStockItems.length} low-stock items. Emitting events...`);
+
+    for (const item of lowStockItems) {
+      const payload = {
+        menuItemId: item.menu_item_id,
+        itemName: item.menu_item.name, // We have the name from the join
+        restaurantId: item.restaurant_id,
+        ownerId: item.restaurant.owner_id, // <-- CRITICAL: Add ownerId to payload
+        remainingStock: item.stock_quantity,
+        reorderLevel: item.reorder_level,
+      };
+
+      await this.kafkaClient.emit('inventory.low_stock', payload);
+
+      // Optional: Update the flag to prevent re-notifying
+      // await this.inventoryRepository.update(item.id, { low_stock_notified: true });
+    }
+  }
+
+
 
   async syncAvailability(): Promise<{ madeAvailable: number; madeUnavailable: number }> {
     const queryRunner = this.dataSource.createQueryRunner();
@@ -322,5 +363,6 @@ export class InventoryService {
       await queryRunner.release();
     }
   }
+  
 }
 

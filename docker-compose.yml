@@ -1,212 +1,3 @@
-
-# docker-compose.yml (root)
-# NOTE: you can remove the `version:` key if you want — compose prints a warning but it still works.
-# services:
-#   zookeeper:
-#     image: bitnami/zookeeper:3.8
-#     container_name: zookeeper
-#     environment:
-#       - ALLOW_ANONYMOUS_LOGIN=yes
-#     ports:
-#       - '2181:2181'
-#     networks:
-#       - erp-net
-
-#   kafka:
-#     image: bitnami/kafka:3.6
-#     container_name: kafka
-#     environment:
-#       - KAFKA_BROKER_ID=1
-#       - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
-#       - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,PLAINTEXT_HOST://:29092
-#       - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
-#       - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-#       - ALLOW_PLAINTEXT_LISTENER=yes
-#     depends_on:
-#       - zookeeper
-#     ports:
-#       - '9092:9092' 
-#       - '29092:29092'
-#     networks:
-#       - erp-net
-
-#   mailhog:   # ← FIXED (now its own top-level service)
-#     image: mailhog/mailhog
-#     container_name: mailhog
-#     ports:
-#       - "1025:1025" # SMTP
-#       - "8025:8025" # Web UI
-#     networks:
-#       - erp-net
-
-#   catalog-db:
-#     image: postgres:15-alpine
-#     environment:
-#       POSTGRES_USER: postgres
-#       POSTGRES_PASSWORD: postgres
-#       POSTGRES_DB: catalog
-#     ports:
-#       - '5433:5432'
-#     volumes:
-#       - catalog_pgdata:/var/lib/postgresql/data
-#     networks:
-#       - erp-net
-
-#   analytics-db:
-#     image: postgres:15-alpine
-#     environment:
-#       POSTGRES_USER: postgres
-#       POSTGRES_PASSWORD: postgres
-#       POSTGRES_DB: analytics
-#     ports:
-#       - '5435:5432'
-#     volumes:
-#       - analytics_pgdata:/var/lib/postgresql/data
-#     networks:
-#       - erp-net
-
-#   notification-db:
-#     image: postgres:15-alpine
-#     environment:
-#       POSTGRES_USER: postgres
-#       POSTGRES_PASSWORD: postgres
-#       POSTGRES_DB: notification
-#     ports:
-#       - '5436:5432'
-#     volumes:
-#       - notification_pgdata:/var/lib/postgresql/data
-#     networks:
-#       - erp-net
-
-#   auth-service-db:
-#     image: postgres:15-alpine
-#     environment:
-#       POSTGRES_USER: postgres
-#       POSTGRES_PASSWORD: postgres
-#       POSTGRES_DB: auth_service
-#     ports:
-#       - '5437:5432'
-#     volumes:
-#       - auth_service_pgdata:/var/lib/postgresql/data
-#     networks:
-#       - erp-net
-
-#   payment-db:
-#     image: postgres:15-alpine
-#     environment:
-#       POSTGRES_USER: postgres
-#       POSTGRES_PASSWORD: postgres
-#       POSTGRES_DB: payment
-#     ports:
-#       - '5438:5432'
-#     volumes:
-#       - payment_pgdata:/var/lib/postgresql/data
-#     networks:
-#       - erp-net
-
-#   catalog-service:
-#     build: ./catalog-service
-#     env_file:
-#       - ./catalog-service/.env
-#     depends_on:
-#       - catalog-db
-#       - kafka
-#     networks:
-#       - erp-net
-#     environment:
-#       - POSTGRES_HOST=catalog-db
-#       - POSTGRES_PORT=5432
-#       - POSTGRES_USER=postgres
-#       - POSTGRES_PASSWORD=postgres
-#       - POSTGRES_DB=catalog
-#       - KAFKA_BROKER=kafka:9092
-
-#   analytics-service:
-#     build: ./analytics-service
-#     env_file:
-#       - ./analytics-service/.env
-#     depends_on:
-#       - analytics-db
-#       - kafka
-#     networks:
-#       - erp-net
-#     environment:
-#       - POSTGRES_HOST=analytics-db
-#       - POSTGRES_PORT=5432
-#       - POSTGRES_USER=postgres
-#       - POSTGRES_PASSWORD=postgres
-#       - POSTGRES_DB=analytics
-#       - KAFKA_BROKER=kafka:9092
-
-
-#   notification-service:
-#     build: ./notification-service
-#     env_file:
-#       - ./notification-service/.env
-#     depends_on:
-#       - notification-db
-#       - kafka
-#     networks:
-#       - erp-net
-#     environment:
-#       - POSTGRES_HOST=notification-db
-#       - POSTGRES_PORT=5432
-#       - POSTGRES_USER=postgres
-#       - POSTGRES_PASSWORD=postgres
-#       - POSTGRES_DB=notification
-#       - KAFKA_BROKER=kafka:9092
-
-#   auth-service:
-#     build: ./auth-service
-#     env_file:
-#       - ./auth-service/.env
-#     depends_on:
-#       - auth-service-db
-#       - kafka
-#     networks:
-#       - erp-net
-#     environment:
-#       - POSTGRES_HOST=auth-service-db
-#       - POSTGRES_PORT=5432
-#       - POSTGRES_USER=postgres
-#       - POSTGRES_PASSWORD=postgres
-#       - POSTGRES_DB=auth_service
-#       - KAFKA_BROKER=kafka:9092
-
-#   payment-service:
-#     build: ./payment-service
-#     env_file:
-#       - ./payment-service/.env
-#     depends_on:
-#       - payment-db
-#       - kafka
-#     networks:
-#       - erp-net
-#     ports:
-#       - "3004:3004"
-#     environment:
-#       - POSTGRES_HOST=payment-db
-#       - POSTGRES_PORT=5432
-#       - POSTGRES_USER=postgres
-#       - POSTGRES_PASSWORD=postgres
-#       - POSTGRES_DB=payment
-#       - KAFKA_BROKER=kafka:9092
-
-# networks:
-#   erp-net:
-#     driver: bridge
-
-# volumes:
-#   catalog_pgdata:
-#   auth_service_pgdata:
-#   inventory_management_pgdata:
-#   analytics_pgdata:
-#   notification_pgdata:
-#   payment_pgdata:
-
-
-# docker-compose.yml (root)
-# NOTE: you can remove the `version:` key if you want — compose prints a warning but it still works.
 services:
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
@@ -214,10 +5,11 @@ services:
     ports:
       - '2181:2181'
     environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_CLIENT_PORT: 2181  # <-- TYPO FIXED HERE
       ZOOKEEPER_TICK_TIME: 2000
     networks:
       - erp-net
+
   kafka:
     image: confluentinc/cp-kafka:7.5.0
     container_name: kafka
@@ -235,8 +27,7 @@ services:
     networks:
       - erp-net
 
-
-  mailhog:   # ← FIXED (now its own top-level service)
+  mailhog:
     image: mailhog/mailhog
     container_name: mailhog
     ports:
@@ -245,6 +36,7 @@ services:
     networks:
       - erp-net
 
+  # --- DATABASES ---
   catalog-db:
     image: postgres:15-alpine
     environment:
@@ -297,16 +89,29 @@ services:
     networks:
       - erp-net
 
-  order-db:
+  payment-db:
     image: postgres:15-alpine
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: order
+      POSTGRES_DB: payment
     ports:
       - '5438:5432'
-     volumes:
-      - order_pgdata:/var/lib/postgresql/data
+    volumes:
+      - payment_pgdata:/var/lib/postgresql/data
+    networks:
+      - erp-net
+
+  # --- APPLICATION SERVICES ---
+  auth-service:
+    build: ./auth-service
+    ports:
+      - "8000:3000"
+    env_file:
+      - ./auth-service/.env
+    depends_on:
+      - auth-service-db
+      - kafka
     networks:
       - erp-net
 
@@ -321,6 +126,31 @@ services:
       - kafka
     networks:
       - erp-net
+
+  notification-service:
+    build: ./notification-service
+    ports:
+      - "8002:3002"
+    env_file:
+      - ./notification-service/.env
+    depends_on:
+      - notification-db
+      - kafka
+    networks:
+      - erp-net
+
+  payment-service:
+    build: ./payment-service
+    ports:
+      - "8003:3008"
+    env_file:
+      - ./payment-service/.env
+    depends_on:
+      - payment-db
+      - kafka
+    networks:
+      - erp-net
+
   analytics-service:
     build: ./analytics-service
     env_file:
@@ -330,62 +160,8 @@ services:
       - kafka
     networks:
       - erp-net
-    environment:
-      - POSTGRES_HOST=analytics-db
-      - POSTGRES_PORT=5432
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=analytics
-      - KAFKA_BROKER=kafka:9092
 
-notification-service:
-    build: ./notification-service
-    env_file:
-      - ./notification-service/.env
-    depends_on:
-      - notification-db
-      - kafka
-    networks:
-      - erp-net
-    environment:
-      - POSTGRES_HOST=notification-db
-      - POSTGRES_PORT=5432
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=notification
-      - KAFKA_BROKER=kafka:9092
-
-  
-  auth-service:
-    build: ./auth-service
-    ports:
-      - "8000:3000"
-    env_file:
-      - ./auth-service/.env
-    depends_on:
-      - auth-service-db
-      - kafka
-    networks:
-      - erp-net
-  order-service:
-    build: ./order-service
-    env_file:
-      - ./order-service/.env
-    depends_on:
-      - order-db
-      - kafka
-    networks:
-      - erp-net
-    ports:
-      - "3004:3004"
-    environment:
-      - POSTGRES_HOST=order-db
-      - POSTGRES_PORT=5432
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=order
-      - KAFKA_BROKER=kafka:9092
-
+# --- NETWORKS & VOLUMES ---
 networks:
   erp-net:
     driver: bridge
@@ -393,10 +169,6 @@ networks:
 volumes:
   catalog_pgdata:
   auth_service_pgdata:
-  inventory_management_pgdata:
   analytics_pgdata:
   notification_pgdata:
-  order_pgdata:
-
-
-
+  payment_pgdata:

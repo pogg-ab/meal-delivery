@@ -14,7 +14,7 @@ import { Inventory } from 'src/entities/inventory.entity';
 import { UpdateInventoryDto } from './dto/update-inventory.dto';
 import { ReplenishInventoryDto } from './dto/replenish-inventory.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiOkResponse, ApiBody, ApiParam, ApiExtraModels, ApiForbiddenResponse, ApiUnauthorizedResponse, ApiNotFoundResponse } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiOkResponse, ApiBody, ApiParam, ApiExtraModels, ApiForbiddenResponse, ApiUnauthorizedResponse, ApiNotFoundResponse, ApiExcludeEndpoint } from '@nestjs/swagger';
 import { ReplenishResponseDto } from './dto/replenish-response.dto';
 import { InventoryDto } from './dto/inventory-response.dto';
 import { UserId } from '../../common/decorator/user-id.decorator';
@@ -77,4 +77,11 @@ export class InventoryController {
   ) {
     return this.inventoryService.replenishStock(replenishInventoryDto.items, userId);
   }
+  @Post('test/trigger-low-stock-check')
+@ApiExcludeEndpoint() // Hide from public docs
+async triggerLowStockCheck() {
+    // We are just manually calling the cron job's method
+    this.inventoryService.handleLowStockCheck(); 
+    return { message: "Low-stock check has been triggered successfully." };
+}
 }

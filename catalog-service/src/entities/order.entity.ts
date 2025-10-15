@@ -74,4 +74,4 @@ created_at: Date;
 updated_at: Date;
 }
 
-export { Restaurant };
+export { Restaurant, OrderStatus };
