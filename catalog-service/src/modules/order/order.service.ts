@@ -23,6 +23,7 @@ export class OrdersService {
 
   constructor(
     @InjectRepository(Order) private readonly orderRepo: Repository<Order>,
+    @InjectRepository(OrderEvent) private readonly orderEventRepo: Repository<OrderEvent>,
     @InjectRepository(OrderItem) private readonly orderItemRepo: Repository<OrderItem>,
     @InjectRepository(MenuItem) private readonly menuItemRepo: Repository<MenuItem>,
     @InjectRepository(Restaurant) private readonly restaurantRepo: Repository<Restaurant>,
@@ -219,59 +220,84 @@ async ownerResponse(ownerId: string, orderId: string, accepted: boolean, reason?
   return { ok: true };
 }
 
-  // async handlePaymentResult(payload: any) {
-  //   console.log('payload emmitted from PS: ', payload);
-  //   this.logger.log(`handlePaymentResult: ${JSON.stringify(payload)}`);
-  //   const order = await this.orderRepo.findOne({ where: { id: payload.order_id }, relations: ['items', 'restaurant'] });
-  //   if (!order) {
-  //     this.logger.warn(`Order not found for payment result: ${payload.order_id}`);
-  //     return;
-  //   }
 
-  //   if (payload?.payment_data?.status === 'success' || payload?.payment_data?.status === 'paid') {
-  //     order.payment_status = PaymentStatus.PAID;
-  //     order.payment_reference = payload?.payment_data?.data?.reference;
-  //     order.paid_at = payload?.payment_data?.created_at ? new Date(payload?.payment_data?.created_at) : new Date();
 
-  //     // advance order state
-  //     order.status = OrderStatus.PAID;
-  //     await this.orderRepo.save(order);
+// Called when payment.initiated event is received from PaymentService
+async handlePaymentInitiated(payload: any) {
+  const orderId = payload?.order_id;
+  if (!orderId) {
+    this.logger.warn('payment.initiated missing order_id', { payload });
+  }
 
-  //     await this.orderRepo.manager.getRepository(OrderEvent).save(
-  //       this.orderRepo.manager.getRepository(OrderEvent).create({
-  //         order_id: order.id,
-  //         action: 'PAYMENT_CONFIRMED',
-  //         meta: payload,
-  //       } as DeepPartial<OrderEvent>),
-  //     );
 
-  //     // NO inventory deduction emitted
-  //     try {
-  //       await this.kafka.emit('order.paid', { order_id: order.id, paid_at: order.paid_at });
-  //     } catch (e) {
-  //       this.logger.warn('Kafka emit failed for order.paid', e as any);
-  //     }
+  const order = await this.orderRepo.findOne({ where: { id: orderId } });
+  if (!order) {
+    this.logger.warn(`Order not found for payment.initiated order=${orderId}`);
+    return;
+   }
 
-  //     this.gateway.emitOrderUpdated(order);
-  //     return;
-  //   }
 
-  //   // payment failed
-  //   order.payment_status = PaymentStatus.FAILED;
-  //   order.status = OrderStatus.DECLINED;
-  //   await this.orderRepo.save(order);
+   const incomingTx = payload?.tx_ref ?? null;
+   const incomingCheckout = payload?.checkout_url ?? payload?.checkoutUrl ?? null;
+   const incomingExpires = payload?.expires_at ? new Date(payload.expires_at) : payload?.expiresAt ? new Date(payload.expiresAt) : null;
 
-  //   await this.orderRepo.manager.getRepository(OrderEvent).save(
-  //     this.orderRepo.manager.getRepository(OrderEvent).create({
-  //       order_id: order.id,
-  //       action: 'PAYMENT_FAILED',
-  //       meta: payload,
-  //     } as DeepPartial<OrderEvent>),
-  //   );
 
-  //   this.gateway.emitOrderUpdated(order);
-  // }
+   // If an active tx_ref already exists and is not expired, and incoming tx_ref differs,
+   // prefer existing active one (idempotency) — otherwise update
+    let keepExisting = false;
+  if (order.tx_ref && order.payment_expires_at) {
+    const now = new Date();
+    if (order.payment_expires_at.getTime() > now.getTime()) {
+    // existing checkout still active
+    if (incomingTx && order.tx_ref === incomingTx) {
+   // same transaction -> nothing to change
+    keepExisting = true;
+    } else {
+   // different tx_ref but existing active checkout -> do not overwrite
+   this.logger.log(`Existing active checkout present for order ${orderId}. Skipping overwrite.`);
+   keepExisting = true;
+   }
+  }
+}
 
+   if (!keepExisting) {
+    order.tx_ref = incomingTx ?? order.tx_ref;
+    order.checkout_url = incomingCheckout ?? order.checkout_url;
+    order.payment_expires_at = incomingExpires ?? order.payment_expires_at;
+    // mark as initiated
+   try {
+    // avoid importing enum here; set string to match enum
+      (order as any).payment_status = 'INITIATED';
+    } catch (e) {}
+
+
+   try {
+     await this.orderRepo.save(order);
+    // persist an order event
+    await this.orderEventRepo.save(
+    this.orderEventRepo.create({
+    order_id: order.id,
+    action: 'PAYMENT_INITIATED',
+    meta: payload,
+    } as Partial<OrderEvent>),
+  );
+ } catch (e) {
+    this.logger.error('Failed to save order update for payment.initiated', e as any);
+  }
+}
+
+
+// Optionally: emit websocket update via gateway (if injected) so customer/restaurant UI updates
+try {
+// this.gateway.emitOrderUpdated(order);
+  } catch (e) {
+ // ignore
+ }
+  return order;
+}
+
+
+  
 
   async handlePaymentResult(payload: any) {
   this.logger.log(`handlePaymentResult: ${JSON.stringify(payload)}`);

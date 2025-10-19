@@ -59,6 +59,19 @@ payment_reference?: string;
 @Column({ type: 'timestamp', nullable: true })
 paid_at?: Date;
 
+// NEW: payment-related fields copied from PaymentService for easy client polling
+@Column({ type: 'varchar', length: 255, nullable: true })
+tx_ref?: string | null;
+
+@Column({ type: 'text', nullable: true })
+checkout_url?: string | null;
+
+@Column({ type: 'timestamp', nullable: true })
+payment_expires_at?: Date | null;
+
+@Column({ type: 'varchar', length: 255, nullable: true })
+chapa_tx_id?: string | null;
+
 @OneToMany(() => OrderItem, (item) => item.order, { cascade: true })
 items: OrderItem[];
 

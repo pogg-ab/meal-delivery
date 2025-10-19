@@ -20,7 +20,6 @@ export class OrderPickup {
 @PrimaryGeneratedColumn('uuid')
 id: string;
 
-
 @Index({ unique: true })
 @Column({ type: 'uuid' })
 order_id: string;
@@ -29,7 +28,6 @@ order_id: string;
 @ManyToOne(() => Order, { onDelete: 'CASCADE' })
 @JoinColumn({ name: 'order_id' })
 order?: Order;
-
 
 // store only hash of code
 @Column({ type: 'varchar', length: 128, name: 'pickup_code_hash' })

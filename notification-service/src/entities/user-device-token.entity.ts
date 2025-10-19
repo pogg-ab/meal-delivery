@@ -15,7 +15,7 @@ export class UserDeviceToken {
 
   @Index() // Index for faster lookups by user
  @Column({ name: 'user_id', type: 'varchar' })
-userId: string;
+  userId: string;
 
   @Column({ name: 'device_token', type: 'text', unique: true })
   deviceToken: string;

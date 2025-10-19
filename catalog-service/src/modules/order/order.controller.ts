@@ -39,6 +39,8 @@ import { plainToInstance } from 'class-transformer';
 import { Order } from '../../entities/order.entity';
 import { OrdersPickupService } from './order-pickup.service';
 import { VerifyPickupDto } from './dtos/verify-pickup.dto';
+import { RolesGuard } from 'src/common/guards/roles.guard';
+import { Roles } from 'src/common/decorator/roles.decorator';
 
 @ApiTags('Orders')
 @Controller('orders')
@@ -118,6 +120,7 @@ export class OrdersController {
     return this.ordersService.ownerResponse(ownerId, id, body.accepted, body.reason);
   }
 
+  
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('access-token')
   @Post(':id/coming')
@@ -255,45 +258,166 @@ export class OrdersController {
     throw new ForbiddenException('Forbidden');
   }
 
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @Get(':id/payment')
+  @ApiOperation({ summary: 'Customer: get payment info (checkout url & status) for their order' })
+  @ApiParam({ name: 'id', description: 'Order id (uuid)' })
+  @ApiResponse({
+    status: 200,
+    description: 'Returns payment info for the order (primitives only).',
+    schema: {
+      example: {
+        tx_ref: 'order-96a88900-mghx039l',
+        checkout_url: 'https://checkout.chapa.io/checkout/abcd1234',
+        payment_expires_at: '2025-10-16T15:30:00.000Z',
+        payment_status: 'INITIATED'
+      }
+    }
+  })
+  async getPaymentForOrder(
+    @Req() req: any,
+    @Param('id', new ParseUUIDPipe()) orderId: string,
+  ): Promise<{ tx_ref?: string; checkout_url?: string; payment_expires_at?: Date | string; payment_status?: string }> {
+    const userId = this.getUserIdFromReq(req);
+    const order = await this.ordersService.getOrderById(orderId);
+    if (!order) {
+      throw new ForbiddenException('Order not found or not accessible');
+    }
 
-//   @UseGuards(JwtAuthGuard)
-//   @ApiBearerAuth('access-token')
-//   @Post(':id/pickup')
-//   @ApiParam({ name: 'id', description: 'Order id (uuid)' })
-//   @ApiOperation({ summary: 'Issue pickup code for an order' })
-//     async issuePickup(@Req() req: any, @Param('id', new ParseUUIDPipe()) orderId: string, @Body() body?: { expiryMinutes?: number }) {
-//       const userId = req.user?.userId ?? req.user?.sub ?? req.user?.id;
-//       const order = await this.pickupService.issuePickupForOrder(orderId, body?.expiryMinutes ?? 30);
-//       if (!order) throw new NotFoundException('Order or pickup not available');
-//         return order;
-//     }
+    // allow only the customer who placed the order
+    if (order.customer_id !== userId) {
+      throw new ForbiddenException('Not allowed to view payment for this order');
+    }
+
+    // Pick a small set of safe, primitive fields to return.
+    const tx_ref = (order as any).tx_ref ?? (order as any).payment_tx_ref ?? (order as any).payment_reference ?? undefined;
+    const checkout_url = (order as any).checkout_url ?? (order as any).payment_checkout_url ?? undefined;
+    const payment_expires_at = (order as any).payment_expires_at ?? (order as any).payment_expires_at ?? undefined;
+    const payment_status = String(order.payment_status ?? '').toUpperCase() ?? undefined;
+
+    return {
+      tx_ref,
+      checkout_url,
+      payment_expires_at,
+      payment_status,
+    };
+  }
 
 
-//   @UseGuards(JwtAuthGuard)
-//   @ApiBearerAuth('access-token')
-//   @Get(':id/pickup')
-//   @ApiParam({ name: 'id', description: 'Order id (uuid)' })
-//   @ApiOperation({ summary: 'Get pickup record for an order' })
-//   async getPickup(@Param('id', new ParseUUIDPipe()) orderId: string) {
-//    const rec = await this.pickupService.getPickupByOrder(orderId);
-//    if (!rec) throw new NotFoundException('Pickup not found');
-//   return rec;
-//   }
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth('access-token')
+@Get(':id/pickup')
+@ApiOperation({ summary: 'Customer: get or issue pickup code/token for their order' })
+@ApiParam({ name: 'id', description: 'Order id (uuid)' })
+@ApiResponse({
+  status: 200,
+  description: 'Returns pickup token, plaintext pickup code (for customer) and expiry.',
+  schema: {
+    example: {
+      pickup_token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+      pickup_code: '012345',
+      expires_at: '2025-10-14T15:30:00.000Z',
+    },
+  },
+})
+
+async getPickupForCustomer(
+  @Req() req: any,
+  @Param('id', new ParseUUIDPipe()) orderId: string,
+): Promise<{ pickup_token?: string; pickup_code?: string; expires_at?: Date }> {
+  
+  const userId = this.getUserIdFromReq(req);
+  const order = await this.ordersService.getOrderById(orderId); // assumes this method exists and returns Order with customer_id
+  if (!order) {
+    throw new ForbiddenException('Order not found or not accessible');
+  }
+
+  if (order.customer_id !== userId) {
+    throw new ForbiddenException('Not allowed to view pickup for this order');
+  }
+  const pickup = await this.pickupService.getOrIssuePickupForCustomer(orderId, userId);
+
+  // Return only safe primitives to the customer
+  return {
+    pickup_token: pickup.pickup_token ?? undefined,
+    pickup_code: pickup.pickup_code ?? undefined,
+    expires_at: pickup.expires_at ?? undefined,
+  };
+}
+
+// OrdersController (excerpt)
+@Post(':id/pickup/verify')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('restaurant_owner')
+@ApiBearerAuth('access-token')
+@ApiOperation({ summary: 'Verify pickup by code or token (restaurant owner/staff)' })
+@ApiParam({ name: 'id', description: 'Order id (uuid)' })
+@ApiBody({ type: VerifyPickupDto })
+@ApiResponse({ status: 200, description: 'Pickup verified' })
+async verifyPickup(
+  @Req() req: any,
+  @Param('id', new ParseUUIDPipe()) orderId: string,
+  @Body() dto: VerifyPickupDto,
+) {
+  // actor id (user performing verification)
+  const actorId: string = req.user?.userId ?? req.user?.sub ?? req.user?.id;
+  const actorRestaurantId: string | undefined = req.user?.restaurantId;
+
+  if (!actorRestaurantId) {
+    throw new ForbiddenException('No restaurant id in token; only restaurant owners can verify');
+  }
+
+  this.logger.log(`verifyPickup called by ${actorId} (restaurant ${actorRestaurantId}) for order ${orderId}`);
+
+  // Service now requires actorRestaurantId to validate ownership
+  const result = await this.pickupService.verifyPickupAsOwner(orderId, actorId, actorRestaurantId, {
+    code: dto.code,
+    token: dto.token,
+  });
+
+  // normalized response for the caller (restaurant UI)
+  return {
+    ok: true,
+    pickup: {
+      id: result.id,
+      order_id: result.order_id,
+      pickup_token: result.pickup_token ?? null,
+      expires_at: result.expires_at,
+      verified: result.verified,
+      verified_by: result.verified_by,
+      verified_at: result.verified_at,
+    },
+    order: {
+      id: result.order.id,
+      customer_name: result.order.customer_name ?? result.order.customer_id, // fallback
+      customer_phone: result.order.customer_phone ?? null,
+      items: (result.order.items || []).map((it: any) => ({
+        id: it.id,
+        name: it.name,
+        quantity: it.quantity,
+        unit_price: Number(it.unit_price),
+        subtotal: Number(it.subtotal),
+      })),
+      total_amount: Number(result.order.total_amount ?? 0),
+      currency: result.order.currency ?? null,
+    },
+  };
+}
 
 
-// @UseGuards(JwtAuthGuard)
-// @ApiBearerAuth('access-token')
-// @Post(':id/pickup/verify')
-// @ApiParam({ name: 'id', description: 'Order id (uuid)' })
-// @ApiBody({ type: VerifyPickupDto })
-// @ApiOperation({ summary: 'Verify pickup code/token' })
-// async verifyPickup(@Req() req: any, @Param('id', new ParseUUIDPipe()) orderId: string, @Body() dto: VerifyPickupDto) {
-// const actorId = req.user?.userId ?? req.user?.sub ?? req.user?.id;
-// const res = await this.pickupService.verifyPickup(orderId, actorId, { code: dto.code, token: dto.token });
-// return res;
-// }
 
   /** Microservice event handlers (Kafka) — payment results. Using EventPattern for fire-and-forget events. */
+
+    @EventPattern('payment.initiated')
+    async onPaymentInitiated(@Payload() payload: any) {
+      try {
+       this.ordersService.handlePaymentInitiated(payload);
+      } catch (e) {
+    // log and swallow — consumer should not crash
+      console.error('Failed handling payment.initiated', e);
+      }
+   }
 
   @EventPattern('payment.success')
   async onPaymentSuccess(@Payload() payload: any) {

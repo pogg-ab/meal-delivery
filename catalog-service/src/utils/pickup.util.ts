@@ -12,12 +12,6 @@ export function generateNumericCode(length = 6): string {
 }
 
 /**
- * Sign a pickup token using JWT.
- *
- * Important: do NOT include "exp" (or iat/nbf) in the payload object.
- * We pass ttlSeconds to jwt.sign via options.expiresIn so jsonwebtoken
- * is responsible for setting exp.
- *
  * Returns the signed token string.
  */
 export function signPickupToken(payload: Record<string, any>, secret: string, ttlSeconds = 60 * 30): string {
