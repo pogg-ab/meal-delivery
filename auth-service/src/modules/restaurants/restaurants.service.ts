@@ -19,6 +19,8 @@ import { KafkaProvider } from 'src/providers/kafka.provider';
 import { UsersService } from '../UserModule/user.service';
 import { RolesService } from '../RolesModule/roles.service';
 import { MailerProvider } from 'src/providers/mailer.provider';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+
 
 @Injectable()
 export class RestaurantsService {
@@ -250,12 +252,14 @@ async updateProfile(
   }
   return updatedRestaurant;
 }
-
 async findPendingReview(): Promise<Restaurant[]> {
   return this.restaurantRepository.find({
     where: {
       status: RestaurantStatus.UNDER_REVIEW,
     },
+    
+    relations: ['documents'], 
+   
     order: {
       updated_at: 'ASC',
     },

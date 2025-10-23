@@ -5,6 +5,8 @@ import { MenuItemsController } from './menu-items.controller';
 import { MenuItem } from '../../entities/menu-item.entity';
 import { MenuCategory } from '../../entities/menu-category.entity';
 import { Inventory } from '../../entities/inventory.entity';
+import { Restaurant } from 'src/entities/restaurant.entity';
+
 
 
 @Module({
@@ -13,6 +15,7 @@ import { Inventory } from '../../entities/inventory.entity';
       MenuItem,
       MenuCategory,
       Inventory,
+      Restaurant,
     ]),
   ],
   controllers: [MenuItemsController],
