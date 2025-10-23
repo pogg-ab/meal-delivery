@@ -23,7 +23,8 @@
     "seed:prod": "node dist/src/database/seeds/runner.js"
   },
   "dependencies": {
-    "@nestjs-modules/mailer": "^1.6.1",
+    "@aws-sdk/client-s3": "^3.914.0",
+    "@nestjs-modules/mailer": "^2.0.2",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.2",
     "@nestjs/core": "^11.1.5",
@@ -31,6 +32,7 @@
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.1.5",
     "@nestjs/schedule": "^6.0.0",
+    "@nestjs/serve-static": "^5.0.4",
     "@nestjs/swagger": "^11.2.0",
     "@nestjs/throttler": "^6.4.0",
     "@nestjs/typeorm": "^11.0.0",

@@ -12,7 +12,8 @@ import { KafkaProvider } from './providers/kafka.provider';
 import { MailerProvider } from './providers/mailer.provider';
 import { RestaurantsModule } from './modules/restaurants/restaurants.module';
 import { SharedModule } from './common/shared/shared.module';
-
+import { ServeStaticModule } from '@nestjs/serve-static';
+import { join } from 'path';
 
 @Module({
   imports: [
@@ -38,6 +39,10 @@ import { SharedModule } from './common/shared/shared.module';
         migrationsRun: true,
         migrations: [__dirname + '/migrations/*{.ts,.js}'],
       }),
+    }),
+     ServeStaticModule.forRoot({
+      serveRoot: '/documents', // This is the URL prefix (e.g., http://localhost:3000/documents/...)
+      rootPath: join(__dirname, '..', 'uploads', 'documents'), // This is the physical folder on your server
     }),
     AuthModule,
     RolesModule,
