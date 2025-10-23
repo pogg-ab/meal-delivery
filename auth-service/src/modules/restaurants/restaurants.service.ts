@@ -24,7 +24,6 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 
 @Injectable()
 export class RestaurantsService {
-  
     constructor(
         private readonly usersService: UsersService,
         private readonly rolesService: RolesService,

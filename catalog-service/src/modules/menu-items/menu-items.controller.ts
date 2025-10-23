@@ -1,9 +1,10 @@
-import { Controller, Post, Body, UseGuards, Req, Get, Param, Put, Delete, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Req, Get, Param, Put, Delete, HttpCode, HttpStatus, ParseUUIDPipe } from '@nestjs/common';
 import { MenuItemsService } from './menu-items.service';
 import { CreateMenuItemDto } from './dto/create-menu-item.dto';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { UpdateMenuItemDto } from './dto/update-menu-item.dto';
+import { RestaurantMenuResponseDto } from './dto/restaurant-menu.dto';
 @ApiTags('Menu Items')
 @Controller('menu-items')
 export class MenuItemsController {
@@ -18,11 +19,14 @@ export class MenuItemsController {
     return this.menuItemsService.create(ownerId, createMenuItemDto);
   }
 
-@Get('/restaurant/:restaurantId')
-@ApiOperation({ summary: 'Fetch all public menu items for a restaurant' })
-findAllByRestaurant(@Param('restaurantId') restaurantId: string) {
-  return this.menuItemsService.findAllByRestaurant(restaurantId);
-}
+ @Get('/restaurant/:restaurantId')
+  @ApiOperation({ summary: 'Fetch all public menu items for a restaurant' })
+  @ApiResponse({ status: 200, type: RestaurantMenuResponseDto }) // <-- ADD THIS DECORATOR
+  findAllByRestaurant(
+    @Param('restaurantId', ParseUUIDPipe) restaurantId: string, // Added ParseUUIDPipe for validation
+  ): Promise<RestaurantMenuResponseDto> { // <-- UPDATE RETURN TYPE
+    return this.menuItemsService.findAllByRestaurant(restaurantId);
+  }
 
 @Put(':id')
 @UseGuards(JwtAuthGuard)

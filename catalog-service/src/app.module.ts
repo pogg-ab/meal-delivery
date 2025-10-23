@@ -2,6 +2,11 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
+// --- ADD THESE IMPORTS FOR REDIS CACHING ---
+import { CacheModule } from '@nestjs/cache-manager';
+import { redisStore } from 'cache-manager-redis-store';
+// -----------------------------------------
+
 // --- Combined Imports ---
 import { ScheduleModule } from '@nestjs/schedule';
 import { OrdersModule } from './modules/order/order.module';
@@ -14,10 +19,27 @@ import { RestaurantsModule } from './modules/restaurants/restaurants.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { MenuItemsModule } from './modules/menu-items/menu-items.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
+import { SearchModule } from './modules/search/search.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+
+    CacheModule.registerAsync({
+      isGlobal: true,
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: async (configService: ConfigService) => {
+        const store = await redisStore({ // <-- THIS IS THE CRITICAL FIX
+          url: configService.get<string>('REDIS_URL'),
+          ttl: 300,
+        });
+        return {
+          store: () => store,
+        };
+      },
+    }),
+
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -35,15 +57,16 @@ import { InventoryModule } from './modules/inventory/inventory.module';
       }),
     }),
 
-    // --- Combined Modules ---
-    ScheduleModule.forRoot(), // From the right side
+    // --- Your existing modules ---
+    ScheduleModule.forRoot(),
     SharedModule,
     RestaurantsModule,
-    CategoriesModule, // For the /categories endpoints
-    MenuItemsModule, // For the /menu-items endpoints
-    InventoryModule, // For the /inventory endpoints and consumer
+    CategoriesModule,
+    MenuItemsModule,
+    InventoryModule,
     OrdersModule,
-    ReportsModule, // From the left side
+    ReportsModule,
+    SearchModule,
   ],
   providers: [KafkaProvider],
   exports: [KafkaProvider],
