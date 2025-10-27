@@ -1,4 +1,4 @@
-// notification-service/src/main.ts
+// notification-service/src/main.ts (Corrected Version)
 
 import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
@@ -36,7 +36,8 @@ function setupSwagger(app: INestApplication) {
 
   const document = SwaggerModule.createDocument(app, swaggerConfig);
 
-  document.servers = [{ url: `http://localhost:${PORT}` }];
+  // This line now reads from your .env file
+  document.servers = [{ url: configService.get<string>('SWAGGER_SERVER_URL') || `http://localhost:${PORT}` }];
 
   SwaggerModule.setup('/api/docs', app, document, {
     swaggerOptions: { persistAuthorization: true },
@@ -59,17 +60,16 @@ async function bootstrap() {
   }
 
   // Connect and start the Kafka microservice listener
-  app.connectMicroservice<MicroserviceOptions>(kafkaConfig); // <-- Use the constant directly
+  app.connectMicroservice<MicroserviceOptions>(kafkaConfig);
   await app.startAllMicroservices();
 
-  // Start the HTTP server
-  await app.listen(PORT);
+  // Listen publicly on all network interfaces
+  await app.listen(PORT, '0.0.0.0');
   
   console.log(`🚀 Notification Service running on http://localhost:${PORT}`);
   if (NODE_ENV !== 'production') {
     console.log(`📖 Swagger docs: http://localhost:${PORT}/api/docs`);
   }
 }
-
 
 bootstrap();

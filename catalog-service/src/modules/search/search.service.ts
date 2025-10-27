@@ -1,3 +1,5 @@
+// PASTE THIS ENTIRE CODE BLOCK INTO search.service.ts
+
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
@@ -21,35 +23,23 @@ export class SearchService {
 
   constructor(
     private readonly entityManager: EntityManager,
-    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache, // This injects the Redis cache
+    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
   ) {}
 
   async performSearch(queryDto: SearchQuery): Promise<PaginatedSearchResult> {
     const { q, type = 'all', limit = 10, offset = 0 } = queryDto;
-
-    if (!q || q.trim().length === 0) {
-      return { results: [], total: 0 };
-    }
+    if (!q || q.trim().length === 0) { return { results: [], total: 0 }; }
     
-    // 1. Create a unique key for this exact search
     const cacheKey = `search:${type}:${q}:${limit}:${offset}`;
-    
-    // 2. Try to get the result from the cache
     const cachedResult = await this.cacheManager.get<PaginatedSearchResult>(cacheKey);
-
-    // 3. If a result is found in the cache, return it immediately!
     if (cachedResult) {
       this.logger.log(`Cache HIT for key: ${cacheKey}`);
       return cachedResult;
     }
-
-    // 4. If nothing is in the cache, it's a "miss". We continue to the database.
     this.logger.log(`Cache MISS for key: ${cacheKey}. Querying database.`);
     
-    // --- Your original database logic starts here ---
     const cleanedQuery = q.replace(/[^a-zA-Z0-9\s]+/g, ' ').trim();
     const formattedQuery = cleanedQuery.split(/\s+/).join(' & ') + ':*';
-
     let countQuery = '';
     let resultsQuery = '';
     const params = [formattedQuery, limit, offset];
@@ -70,23 +60,17 @@ export class SearchService {
     }
 
     try {
-      const countResultPromise = this.entityManager.query(countQuery, [formattedQuery]);
-      const resultsPromise = this.entityManager.query(resultsQuery, params);
-
-      const [countResult, results] = await Promise.all([countResultPromise, resultsPromise]);
-
+      const [countResult, results] = await Promise.all([
+        this.entityManager.query(countQuery, [formattedQuery]),
+        this.entityManager.query(resultsQuery, params)
+      ]);
       const total = parseInt(countResult[0].count, 10);
-      
       const finalResult = {
         total,
         results: results.map(item => ({...item, rating: parseFloat(item.rating) || 0 })),
       };
-
-      // 5. IMPORTANT: Save the fresh database result to the cache for next time.
       await this.cacheManager.set(cacheKey, finalResult);
-
       return finalResult;
-
     } catch (error) {
       this.logger.error(`Failed to execute search for query: "${q}"`, error.stack);
       throw new Error('An error occurred while performing the search.');

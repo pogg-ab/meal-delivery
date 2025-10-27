@@ -1,24 +1,18 @@
-# Use official Node.js LTS image
-FROM node:18-alpine
-
-# Set working directory
+# ----- Builder Stage -----
+FROM node:20 AS builder
 WORKDIR /usr/src/app
-
-# Copy package files and install dependencies
 COPY package*.json ./
-RUN npm install --production
-
-# Copy the rest of the application
+RUN npm install --legacy-peer-deps
 COPY . .
-
-# Build the app
 RUN npm run build
 
-# Expose port (if needed for HTTP)
-EXPOSE 3000
-
-# Set environment variables (override in production)
-ENV NODE_ENV=production
-
-# Start the microservice
-CMD ["node", "dist/main.js"] 
+# ----- Production Stage -----
+FROM node:20-alpine
+WORKDIR /usr/src/app
+COPY package*.json ./
+RUN npm install --production --legacy-peer-deps
+COPY --from=builder /usr/src/app/dist ./dist
+COPY --from=builder /usr/src/app/data-source.js ./data-source.js
+# We must remember to copy the firebase credentials here!
+COPY --from=builder /usr/src/app/firebase-credentials.json ./firebase-credentials.json
+CMD ["node", "dist/main"]
