@@ -1,25 +1,32 @@
-// src/modules/menu-items/dto/restaurant-menu.dto.ts
 import { ApiProperty } from '@nestjs/swagger';
 
 class MenuItemInfo {
-  @ApiProperty()
+  @ApiProperty({ example: '11b7dad9-673c-4b52-9228-7ddd868f4a17' })
   id: string;
 
-  @ApiProperty()
+  @ApiProperty({ example: 'Doro Wet' })
   name: string;
 
-  @ApiProperty()
-  price: number;
+  @ApiProperty({ example: '250.00' })
+  price: string; // Your entity uses a string for price, so we'll match that
   
-  @ApiProperty()
+  @ApiProperty({ example: false })
   is_available: boolean;
+
+  // --- CHANGES START HERE ---
+  @ApiProperty({ example: 'a1b2c3d4-e5f6-7890-1234-567890abcdef' })
+  categoryId: string;
+
+  @ApiProperty({ example: 'Main Dishes' })
+  categoryName: string;
+  // --- CHANGES END HERE ---
 }
 
 export class RestaurantMenuResponseDto {
-  @ApiProperty()
+  @ApiProperty({ example: 'cb52303b-4ec7-452f-8570-25d8b37396c4' })
   restaurantId: string;
 
-  @ApiProperty()
+  @ApiProperty({ example: "Mel's Place" })
   restaurantName: string;
   
   @ApiProperty({ type: [MenuItemInfo] })

@@ -60,32 +60,44 @@ export class MenuItemsService {
   }
 
   // --- THIS IS THE METHOD WE ARE REFACTORING ---
-  async findAllByRestaurant(restaurantId: string): Promise<RestaurantMenuResponseDto> {
-    // Step 1: Find the restaurant to get its name and confirm it exists.
+ async findAllByRestaurant(restaurantId: string): Promise<RestaurantMenuResponseDto> {
+    // Step 1: Find the restaurant to get its name and confirm it exists. (This is unchanged)
     const restaurant = await this.restaurantRepository.findOneBy({ id: restaurantId });
     if (!restaurant) {
       throw new NotFoundException(`Restaurant with ID "${restaurantId}" not found`);
     }
 
-    // Step 2: Use your existing query logic, but select only the fields needed for the DTO.
-    const menuItems = await this.menuItemRepository.createQueryBuilder('menuItem')
+    // Step 2: Modify the query to select the needed category fields.
+    const menuItemsWithCategory = await this.menuItemRepository.createQueryBuilder('menuItem')
       .innerJoin('menuItem.category', 'category')
       .where('category.restaurant_id = :restaurantId', { restaurantId })
-      .andWhere('menuItem.deleted_at IS NULL') // Keep your existing filters
+      .andWhere('menuItem.deleted_at IS NULL')
       .andWhere('category.deleted_at IS NULL')
       .select([
         'menuItem.id',
         'menuItem.name',
         'menuItem.price',
         'menuItem.is_available',
+        'category.id',      // <-- ADD THIS
+        'category.name',    // <-- AND THIS
       ])
       .getMany();
 
-    // Step 3: Build and return the new response object.
+    // Step 3: Map the results to our updated DTO shape.
+    const formattedMenuItems = menuItemsWithCategory.map(item => ({
+      id: item.id,
+      name: item.name,
+      price: item.price.toString(),
+      is_available: item.is_available,
+      categoryId: item.category.id,
+      categoryName: item.category.name,
+    }));
+
+    // Step 4: Build and return the new response object.
     return {
       restaurantId: restaurant.id,
       restaurantName: restaurant.name,
-      menuItems: menuItems as any, // Cast is safe because we selected the exact properties
+      menuItems: formattedMenuItems, // Use the new formatted array
     };
   }
 

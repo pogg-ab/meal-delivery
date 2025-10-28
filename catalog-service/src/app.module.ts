@@ -1,20 +1,16 @@
+// PASTE THIS ENTIRE CODE BLOCK INTO app.module.ts
+
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-
-// --- ADD THESE IMPORTS FOR REDIS CACHING ---
-import { CacheModule } from '@nestjs/cache-manager';
-import { redisStore } from 'cache-manager-redis-store';
-// -----------------------------------------
-
-// --- Combined Imports ---
 import { ScheduleModule } from '@nestjs/schedule';
+import { CacheModule } from '@nestjs/cache-manager';
+import * as redisStore from 'cache-manager-redis-store';
+
 import { OrdersModule } from './modules/order/order.module';
 import { KafkaProvider } from './providers/kafka.provider';
 import { ReportsModule } from './modules/reports/reports.module';
-
-// Assuming imports for your other modules are here too
-import { SharedModule } from './common/shared/shared.module'; // Or correct path
+import { SharedModule } from './common/shared/shared.module';
 import { RestaurantsModule } from './modules/restaurants/restaurants.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { MenuItemsModule } from './modules/menu-items/menu-items.module';
@@ -24,22 +20,17 @@ import { SearchModule } from './modules/search/search.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
-
     CacheModule.registerAsync({
       isGlobal: true,
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: async (configService: ConfigService) => {
-        const store = await redisStore({ // <-- THIS IS THE CRITICAL FIX
-          url: configService.get<string>('REDIS_URL'),
-          ttl: 300,
-        });
-        return {
-          store: () => store,
-        };
-      },
+      useFactory: (configService: ConfigService) => ({
+        store: redisStore,
+        host: configService.get('REDIS_HOST', 'redis'),
+        port: parseInt(configService.get('REDIS_PORT', '6379'), 10),
+        ttl: 300,
+      }),
     }),
-
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -52,21 +43,12 @@ import { SearchModule } from './modules/search/search.module';
         database: cfg.get('POSTGRES_DB'),
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
         synchronize: false,
-        migrationsRun: false,
+        migrationsRun: true,
         migrations: [__dirname + '/migrations/*{.ts,.js}'],
       }),
     }),
-
-    // --- Your existing modules ---
     ScheduleModule.forRoot(),
-    SharedModule,
-    RestaurantsModule,
-    CategoriesModule,
-    MenuItemsModule,
-    InventoryModule,
-    OrdersModule,
-    ReportsModule,
-    SearchModule,
+    SharedModule, RestaurantsModule, CategoriesModule, MenuItemsModule, InventoryModule, OrdersModule, ReportsModule, SearchModule,
   ],
   providers: [KafkaProvider],
   exports: [KafkaProvider],
