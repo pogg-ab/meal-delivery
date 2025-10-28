@@ -60,7 +60,7 @@ private makeTxRef(order_id: string, maxLen = 50) {
       currency = 'ETB',
       customer_id,
       restaurant_id,
-      return_url,
+      // return_url,
       customer_name,
       // customer_first_name,
       // customer_last_name,

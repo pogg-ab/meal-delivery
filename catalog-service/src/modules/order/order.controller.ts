@@ -120,7 +120,6 @@ export class OrdersController {
     return this.ordersService.ownerResponse(ownerId, id, body.accepted, body.reason);
   }
 
-  
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('access-token')
   @Post(':id/coming')
@@ -131,7 +130,6 @@ export class OrdersController {
     const userId = this.getUserIdFromReq(req);
     return this.ordersService.markCustomerComing(userId, id, body?.note);
   }
-
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('access-token')

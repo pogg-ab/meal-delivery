@@ -98,5 +98,4 @@ async login(@Body() dto: LoginDto, @Req() req: Request): Promise<LoginResponseDt
   async resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto);
   }
-  
 }

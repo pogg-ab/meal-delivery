@@ -1,5 +1,4 @@
 // notification-service/src/modules/notifications/notifications.service.ts
-
 import {
   Injectable,
   Logger,
@@ -29,7 +28,7 @@ export class NotificationsService {
   async registerDeviceToken(
     dto: RegisterDeviceTokenDto,
   ): Promise<UserDeviceToken> {
-    const { userId, deviceToken, platform } = dto;
+    const { userId, deviceToken, platform } = dto;8
     // ... (this method remains the same)
     await this.deviceTokenRepository.upsert({ userId, deviceToken, platform }, [
       'deviceToken',

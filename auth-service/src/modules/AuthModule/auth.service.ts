@@ -224,8 +224,8 @@ async login(user: User, deviceInfo: string, ip: string, remember = false) {
   // --- NEW: find restaurant_id if user is a restaurant_owner ---
   let restaurantId: string | undefined = undefined;
 try {
-  const isOwner = uniqueRoles.some((r) => (r ?? '').toLowerCase() === 'restaurant_owner');
-  if (isOwner) {
+  // const isOwner = uniqueRoles.some((r) => (r ?? '').toLowerCase() === 'restaurant_owner');
+  // if (isOwner) {
     // using your DB shape: restaurants.id and restaurants.owner_id
     const row = await this.userRepo.manager
       .createQueryBuilder()
@@ -238,7 +238,7 @@ try {
     restaurantId = row?.restaurant_id ?? undefined;
     if (!restaurantId) {
       this.logger.debug(`User ${user.user_id} has role restaurant_owner but no restaurants found`);
-    }
+    // }
   }
 } catch (err) {
   this.logger.warn('Failed to fetch restaurant_id for restaurant_owner', err as any);
