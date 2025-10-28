@@ -229,13 +229,11 @@ async handlePaymentInitiated(payload: any) {
     this.logger.warn('payment.initiated missing order_id', { payload });
   }
 
-
   const order = await this.orderRepo.findOne({ where: { id: orderId } });
   if (!order) {
     this.logger.warn(`Order not found for payment.initiated order=${orderId}`);
     return;
    }
-
 
    const incomingTx = payload?.tx_ref ?? null;
    const incomingCheckout = payload?.checkout_url ?? payload?.checkoutUrl ?? null;
@@ -296,8 +294,6 @@ try {
   return order;
 }
 
-
-  
 
   async handlePaymentResult(payload: any) {
   this.logger.log(`handlePaymentResult: ${JSON.stringify(payload)}`);
