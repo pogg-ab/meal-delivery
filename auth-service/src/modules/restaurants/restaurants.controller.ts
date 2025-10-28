@@ -14,17 +14,20 @@ import {
   MaxFileSizeValidator,
   FileTypeValidator,
   Get,
+  ClassSerializerInterceptor,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { RestaurantsService } from './restaurants.service';
 import { RegisterRestaurantDto } from './dto/register-restaurant.dto';
 import { UploadDocumentDto } from './dto/upload-document.dto';
 import { UpdateRestaurantStatusDto } from './dto/update-restaurant-status.dto';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes, ApiBody } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes, ApiBody, ApiResponse } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { UpdateRestaurantDto } from './dto/update-restaurant.dto';
+import { RestaurantProfileDto } from './dto/restaurant-profile.dto';
+import { Restaurant } from 'src/entities/restaurant.entity';
 
 @ApiTags('Restaurants')
 @Controller('restaurants')
@@ -132,4 +135,17 @@ checkStatus(
   const ownerId = req.user.userId;
   return this.restaurantsService.checkOwnerStatus(ownerId, restaurantId);
 }
+
+@Get('me') // <-- NEW ENDPOINT
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Get the profile of the authenticated owner\'s restaurant' })
+  @ApiResponse({ status: 200, description: 'Restaurant profile retrieved successfully.', type: RestaurantProfileDto })
+  @ApiResponse({ status: 404, description: 'No restaurant profile found for the current user.' })
+  @UseInterceptors(ClassSerializerInterceptor) // <-- Helps with DTO transformation
+  getMyRestaurantProfile(@Req() req): Promise<Restaurant> {
+    const ownerId = req.user.userId;
+    return this.restaurantsService.getRestaurantProfileByOwnerId(ownerId);
+  }
+
 }

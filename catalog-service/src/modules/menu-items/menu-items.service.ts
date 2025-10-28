@@ -61,52 +61,49 @@ export class MenuItemsService {
 
   // --- THIS IS THE METHOD WE ARE REFACTORING ---
  async findAllByRestaurant(restaurantId: string): Promise<RestaurantMenuResponseDto> {
-    // Step 1: Find the restaurant to get its name and confirm it exists. (This is unchanged)
-    const restaurant = await this.restaurantRepository.findOneBy({ id: restaurantId });
-    if (!restaurant) {
-      throw new NotFoundException(`Restaurant with ID "${restaurantId}" not found`);
-    }
-
-    // Step 2: Modify the query to select the needed category fields.
-    const menuItemsWithCategory = await this.menuItemRepository.createQueryBuilder('menuItem')
-      .innerJoin('menuItem.category', 'category')
-      .where('category.restaurant_id = :restaurantId', { restaurantId })
-      .andWhere('menuItem.deleted_at IS NULL')
-      .andWhere('category.deleted_at IS NULL')
-      .select([
-        'menuItem.id',
-        'menuItem.name',
-        'menuItem.price',
-        'menuItem.is_available',
-        'category.id',      // <-- ADD THIS
-        'category.name',    // <-- AND THIS
-      ])
-      .getMany();
-
-    // Step 3: Map the results to our updated DTO shape.
-    const formattedMenuItems = menuItemsWithCategory.map(item => ({
-      id: item.id,
-      name: item.name,
-      price: item.price.toString(),
-      is_available: item.is_available,
-      categoryId: item.category.id,
-      categoryName: item.category.name,
-    }));
-
-    // Step 4: Build and return the new response object.
-    return {
-      restaurantId: restaurant.id,
-      restaurantName: restaurant.name,
-      menuItems: formattedMenuItems, // Use the new formatted array
-    };
+  const restaurant = await this.restaurantRepository.findOneBy({ id: restaurantId });
+  if (!restaurant) {
+    throw new NotFoundException(`Restaurant with ID "${restaurantId}" not found`);
   }
 
+  const menuItemsWithCategory = await this.menuItemRepository.createQueryBuilder('menuItem')
+    .innerJoin('menuItem.category', 'category')
+    .where('category.restaurant_id = :restaurantId', { restaurantId })
+    .andWhere('menuItem.deleted_at IS NULL')
+    .andWhere('category.deleted_at IS NULL')
+    .select([
+      'menuItem.id',
+      'menuItem.name',
+      'menuItem.description', // <-- 1. Select the description
+      'menuItem.price',
+      'menuItem.is_available',
+      'category.id',
+      'category.name',
+    ])
+    .getMany();
+
+  const formattedMenuItems = menuItemsWithCategory.map(item => ({
+    id: item.id,
+    name: item.name,
+    description: item.description, // <-- 2. Map the description
+    price: item.price.toString(),
+    is_available: item.is_available,
+    categoryId: item.category.id,
+    categoryName: item.category.name,
+  }));
+
+  return {
+    restaurantId: restaurant.id,
+    restaurantName: restaurant.name,
+    menuItems: formattedMenuItems,
+  };
+}
+
   // This method remains unchanged
-  async update(ownerId: string, itemId: string, updateDto: UpdateMenuItemDto): Promise<MenuItem> {
+   async update(ownerId: string, itemId: string, updateDto: UpdateMenuItemDto): Promise<MenuItem> {
     const menuItem = await this.menuItemRepository.createQueryBuilder('menuItem')
-      .innerJoin('menuItem.category', 'category')
-      .innerJoin('category.restaurant', 'restaurant')
-      .addSelect('restaurant.owner_id')
+      .innerJoinAndSelect('menuItem.category', 'category')
+      .innerJoinAndSelect('category.restaurant', 'restaurant')
       .where('menuItem.id = :itemId', { itemId })
       .getOne();
 
@@ -114,7 +111,6 @@ export class MenuItemsService {
       throw new NotFoundException(`Menu item with ID "${itemId}" not found.`);
     }
     
-    // @ts-ignore
     if (menuItem.category.restaurant.owner_id !== ownerId) {
       throw new ForbiddenException('You do not have permission to edit this item.');
     }
@@ -126,9 +122,8 @@ export class MenuItemsService {
   // This method remains unchanged
   async remove(ownerId: string, itemId: string): Promise<void> {
     const menuItem = await this.menuItemRepository.createQueryBuilder('menuItem')
-      .innerJoin('menuItem.category', 'category')
-      .innerJoin('category.restaurant', 'restaurant')
-      .addSelect('restaurant.owner_id')
+      .innerJoinAndSelect('menuItem.category', 'category')
+      .innerJoinAndSelect('category.restaurant', 'restaurant')
       .where('menuItem.id = :itemId', { itemId })
       .getOne();
 
@@ -136,11 +131,11 @@ export class MenuItemsService {
       throw new NotFoundException(`Menu item with ID "${itemId}" not found.`);
     }
     
-    // @ts-ignore
     if (menuItem.category.restaurant.owner_id !== ownerId) {
       throw new ForbiddenException('You do not have permission to delete this item.');
     }
 
     await this.menuItemRepository.softRemove(menuItem);
   }
+
 }

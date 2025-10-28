@@ -284,4 +284,22 @@ async checkOwnerStatus(ownerId: string, restaurantId: string): Promise<{ status:
     rejection_reason: restaurant.rejection_reason,
   };
 }
+async getRestaurantProfileByOwnerId(ownerId: string): Promise<Restaurant> {
+        const restaurant = await this.restaurantRepository.findOne({
+            where: { owner_id: ownerId },
+            relations: [
+                'addresses',
+                'hours',
+                'documents',
+                'bank_details',
+            ],
+        });
+
+        if (!restaurant) {
+            throw new NotFoundException('No restaurant profile found for the current user.');
+        }
+
+        return restaurant;
+    }
+
 }
