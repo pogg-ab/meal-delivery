@@ -1,5 +1,3 @@
-// src/entities/inventory.entity.ts
-
 import {
   Entity, PrimaryGeneratedColumn, Column, UpdateDateColumn,
   OneToOne, JoinColumn, OneToMany, ManyToOne
@@ -13,21 +11,18 @@ export class Inventory {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  // --- REVERTING THIS PROPERTY ---
   @Column()
   restaurant_id: string;
 
-  // --- REVERTING THIS PROPERTY ---
   @Column()
   menu_item_id: string;
 
-  @Column({ type: 'int', default: 5 }) // Default reorder level is 5 units
+  @Column({ type: 'int', default: 5 }) 
   reorder_level: number;
-  // --- REVERTING THIS PROPERTY ---
+
   @Column({ type: 'int' })
   stock_quantity: number;
 
-  // --- REVERTING THIS PROPERTY ---
   @UpdateDateColumn()
   updated_at: Date;
 
@@ -35,9 +30,12 @@ export class Inventory {
   @JoinColumn({ name: 'restaurant_id' })
   restaurant: Restaurant;
 
-  @OneToOne(() => MenuItem, (item) => item.inventory)
+  @OneToOne(() => MenuItem, (item) => item.inventory, {
+    
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'menu_item_id' })
-  menu_item: MenuItem; // <-- Reverted this as well for consistency
+  menu_item: MenuItem; 
 
   @OneToMany(() => InventoryLog, (log) => log.inventory)
   logs: InventoryLog[];

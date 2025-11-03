@@ -1,4 +1,5 @@
-// in auth-service/src/entities/restaurant-document.entity.ts
+// auth-service/src/entities/restaurant-document.entity.ts
+
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
 import { Restaurant } from './restaurant.entity';
 
@@ -15,6 +16,14 @@ export class RestaurantDocument {
 
   @Column()
   document_url: string;
+
+  // --- UPDATE THIS LINE ---
+  @Column({ nullable: true }) // Allow old records to have a null original_name
+  original_name: string;
+
+  // --- AND UPDATE THIS LINE ---
+  @Column({ nullable: true }) // Allow old records to have a null mimetype
+  mimetype: string;
 
   @Column({ default: 'PENDING' })
   status: string;

@@ -9,6 +9,7 @@ import { InventoryController } from './inventory.controller';
 import { Restaurant } from 'src/entities/restaurant.entity';
 import { MenuCategory } from 'src/entities/menu-category.entity';
 import { KafkaProvider } from 'src/providers/kafka.provider';
+import { InventoryParLevel } from 'src/entities/inventory-par-level.entity';
 
 @Module({
   imports: [
@@ -18,7 +19,7 @@ import { KafkaProvider } from 'src/providers/kafka.provider';
       MenuItem,
       Restaurant,
       MenuCategory,
-      
+      InventoryParLevel,
     ]),
   ],
   providers: [InventoryService, KafkaProvider,],

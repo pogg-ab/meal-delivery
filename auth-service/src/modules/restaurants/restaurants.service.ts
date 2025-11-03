@@ -1,7 +1,7 @@
 
 import { Injectable, ConflictException, NotFoundException, UnauthorizedException, BadRequestException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectEntityManager, InjectRepository } from '@nestjs/typeorm';
+import { EntityManager, In, Repository } from 'typeorm';
 import { RegisterRestaurantDto } from './dto/register-restaurant.dto';
 
 import { Restaurant, RestaurantStatus } from '../../entities/restaurant.entity';
@@ -24,6 +24,7 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 
 @Injectable()
 export class RestaurantsService {
+    // --- THIS IS THE FIX: The constructor is now correct ---
     constructor(
         private readonly usersService: UsersService,
         private readonly rolesService: RolesService,
@@ -38,8 +39,12 @@ export class RestaurantsService {
         @InjectRepository(RestaurantDocument)
         private readonly documentRepository: Repository<RestaurantDocument>,
         @InjectRepository(RestaurantBankDetail)
-        private readonly bankDetailRepository: Repository<RestaurantBankDetail>,  
+        private readonly bankDetailRepository: Repository<RestaurantBankDetail>,
+        // This decorator tells NestJS to inject the EntityManager
+        @InjectEntityManager()
+        private readonly entityManager: EntityManager,
     ) {}
+
 
     async register(registerDto: RegisterRestaurantDto, ownerId: string): Promise<Restaurant> {
         const { name, description, email, phone, address, hours } = registerDto;
@@ -86,7 +91,7 @@ export class RestaurantsService {
         return fullRestaurant;
     }
 
-    async addDocument(
+   async addDocument(
   ownerId: string,
   restaurantId: string,
   uploadDto: UploadDocumentDto,
@@ -94,64 +99,72 @@ export class RestaurantsService {
 ): Promise<RestaurantDocument> {
   const restaurant = await this.restaurantRepository.findOneBy({ id: restaurantId });
 
-  if (!restaurant) {
-    throw new NotFoundException(`Restaurant with ID "${restaurantId}" not found.`);
-  }
-  if (restaurant.owner_id !== ownerId) {
-    throw new UnauthorizedException('You are not the owner of this restaurant.');
-  }
+  if (!restaurant) { throw new NotFoundException(`Restaurant with ID "${restaurantId}" not found.`); }
+  if (restaurant.owner_id !== ownerId) { throw new UnauthorizedException('You are not the owner of this restaurant.'); }
 
-  // For now, we save the file locally. In production, this would be S3, etc.
   const filename = `${uuidv4()}${path.extname(file.originalname)}`;
-  const uploadPath = './uploads/documents'; // Create this folder if it doesn't exist
+  const uploadPath = './uploads/documents';
   const filePath = path.join(uploadPath, filename);
 
-  // Ensure the directory exists
   if (!fs.existsSync(uploadPath)) {
     fs.mkdirSync(uploadPath, { recursive: true });
   }
 
-  // Save the file to disk
   fs.writeFileSync(filePath, file.buffer);
 
-  // Create the database record
   const newDocument = this.documentRepository.create({
     restaurant_id: restaurantId,
     document_type: uploadDto.document_type,
-    document_url: `/documents/${filename}`, // We'll serve this path later
+    // --- THIS IS THE FIX ---
+    document_url: filePath, // We now store the correct, full relative path
+    original_name: file.originalname,
+    mimetype: file.mimetype,
   });
   const savedDocument = await this.documentRepository.save(newDocument);
 
-  // As per requirements, trigger status update to UNDER_REVIEW
   restaurant.status = RestaurantStatus.UNDER_REVIEW;
   await this.restaurantRepository.save(restaurant);
   
   return savedDocument;
 }
-
 async updateStatus(
   restaurantId: string,
   updateStatusDto: UpdateRestaurantStatusDto,
 ): Promise<Restaurant> {
-  const restaurant = await this.restaurantRepository.findOneBy({ id: restaurantId });
+  // --- The entire operation is wrapped in a transaction for data safety ---
+  return this.entityManager.transaction(async (transactionalEntityManager) => {
+    const restaurantRepo = transactionalEntityManager.getRepository(Restaurant);
+    
+    // Find the restaurant AND its owner to get the owner's ID and the previous status
+    const restaurant = await restaurantRepo.findOne({
+      where: { id: restaurantId },
+      relations: ['owner'], 
+    });
 
-  if (!restaurant) {
-    throw new NotFoundException(`Restaurant with ID "${restaurantId}" not found.`);
-  }
+    if (!restaurant) {
+      throw new NotFoundException(`Restaurant with ID "${restaurantId}" not found.`);
+    }
 
-  const { status, rejection_reason } = updateStatusDto;
+    // Capture the state before and after the change
+    const previousStatus = restaurant.status;
+    const newStatus = updateStatusDto.status as unknown as RestaurantStatus;
 
-  if (status === AdminUpdateStatus.REJECTED && !rejection_reason) {
-    throw new BadRequestException('Rejection reason is required when rejecting a restaurant.');
-  }
+    // If the status isn't changing, no need to do anything
+    if (previousStatus === newStatus) {
+        return restaurant;
+    }
 
-  restaurant.status = status as unknown as RestaurantStatus;
-  
-  restaurant.rejection_reason = rejection_reason || '';
+    // --- Your original validation logic ---
+    if (newStatus === RestaurantStatus.REJECTED && !updateStatusDto.rejection_reason) {
+      throw new BadRequestException('Rejection reason is required when rejecting a restaurant.');
+    }
 
-  if (status === AdminUpdateStatus.APPROVED) {
-    restaurant.is_active = true;
-
+    const owner = restaurant.owner;
+    if (!owner) {
+      throw new NotFoundException(`Owner for restaurant ${restaurantId} not found.`);
+    }
+    
+    // --- Your original role-finding logic ---
     const allRoles = await this.rolesService.findAll();
     const ownerRole = allRoles.find(role => role.name === 'restaurant_owner');
 
@@ -159,50 +172,75 @@ async updateStatus(
       throw new NotFoundException('"restaurant_owner" role not found. Please seed the database.');
     }
 
-    // await this.usersService.assignRole(restaurant.owner_id, ownerRole.role_id);
-    await this.usersService.assignRole(restaurant.owner_id, { roleId: ownerRole.role_id });
-
-
-    this.kafkaProvider.emit('restaurant.approved', {
-    id: restaurant.id,
-    name: restaurant.name,
-    owner_id: restaurant.owner_id,
-    is_active: restaurant.is_active,
-  });
-
-    try {
-      await this.mailerProvider.sendMail(
-        restaurant.email, 
-        `Congratulations! Your restaurant "${restaurant.name}" has been approved!`,
-        `Your restaurant is now active and live on our platform. You can now log in to manage your menu and view orders.`,
-        
-        `<p>Congratulations! Your restaurant, <strong>${restaurant.name}</strong>, is now active and live on our platform.</p>`
+    // --- NEW CORE BUSINESS LOGIC FOR ROLE MANAGEMENT ---
+    
+    // 1. If the new status is APPROVED, assign the role.
+    if (newStatus === RestaurantStatus.APPROVED) {
+      await this.usersService.assignRole(
+        owner.user_id, // Use owner's ID from the relation
+        { roleId: ownerRole.role_id }, 
+        transactionalEntityManager // Pass the transaction manager for safety
       );
-    } catch (error) {
-      console.error('Failed to send approval email:', error);
+    } 
+    // 2. If it was previously APPROVED and is now being REJECTED, remove the role.
+    else if (newStatus === RestaurantStatus.REJECTED && previousStatus === RestaurantStatus.APPROVED) {
+      await this.usersService.removeRole(
+        owner.user_id,
+        { roleId: ownerRole.role_id },
+        transactionalEntityManager // Pass the transaction manager for safety
+      );
     }
+    
+    // --- Your original restaurant update logic ---
+    restaurant.status = newStatus;
+    restaurant.is_active = (newStatus === RestaurantStatus.APPROVED);
+    restaurant.rejection_reason = updateStatusDto.rejection_reason || '';
+    
+    // Save the updated restaurant within the transaction
+    const updatedRestaurant = await restaurantRepo.save(restaurant);
 
-  } else { 
-    restaurant.is_active = false;
-   this.kafkaProvider.emit('restaurant.rejected', {
-    id: restaurant.id, 
-    owner_id: restaurant.owner_id, 
-    name: restaurant.name, 
-    rejection_reason: rejection_reason, 
-  });
-  }
-  try {
-      await this.mailerProvider.sendMail(
-        restaurant.email,
-        `Update on your restaurant "${restaurant.name}"`,
-        `There was an update regarding your restaurant application. Reason: ${rejection_reason}`,
-        `<p>There was an update regarding your application for <strong>${restaurant.name}</strong>.</p><p>Reason: ${rejection_reason}</p><p>Please contact support for more information.</p>`
-      );
-    } catch (error) {
-      console.error('Failed to send rejection email:', error);
+    // --- Your original Kafka & Mailer logic (side-effects) ---
+    if (newStatus === RestaurantStatus.APPROVED) {
+        this.kafkaProvider.emit('restaurant.approved', {
+            id: restaurant.id,
+            name: restaurant.name,
+            owner_id: restaurant.owner_id,
+            is_active: restaurant.is_active,
+        });
+
+        try {
+            await this.mailerProvider.sendMail(
+                restaurant.email, 
+                `Congratulations! Your restaurant "${restaurant.name}" has been approved!`,
+                `Your restaurant is now active and live on our platform. You can now log in to manage your menu and view orders.`,
+                `<p>Congratulations! Your restaurant, <strong>${restaurant.name}</strong>, is now active and live on our platform.</p>`
+            );
+        } catch (error) {
+            console.error('Failed to send approval email:', error);
+        }
+
+    } else { // This covers REJECTED and other non-approved statuses
+        this.kafkaProvider.emit('restaurant.rejected', {
+            id: restaurant.id, 
+            owner_id: restaurant.owner_id, 
+            name: restaurant.name, 
+            rejection_reason: updateStatusDto.rejection_reason, 
+        });
+
+        try {
+            await this.mailerProvider.sendMail(
+                restaurant.email,
+                `Update on your restaurant "${restaurant.name}"`,
+                `There was an update regarding your restaurant application. Reason: ${updateStatusDto.rejection_reason}`,
+                `<p>There was an update regarding your application for <strong>${restaurant.name}</strong>.</p><p>Reason: ${updateStatusDto.rejection_reason}</p><p>Please contact support for more information.</p>`
+            );
+        } catch (error) {
+            console.error('Failed to send status update email:', error);
+        }
     }
   
-  return this.restaurantRepository.save(restaurant);
+    return updatedRestaurant;
+  });
 }
 
 async updateProfile(
@@ -252,19 +290,49 @@ async updateProfile(
   }
   return updatedRestaurant;
 }
-async findPendingReview(): Promise<Restaurant[]> {
-  return this.restaurantRepository.find({
-    where: {
-      status: RestaurantStatus.UNDER_REVIEW,
-    },
-    
-    relations: ['documents'], 
-   
-    order: {
-      updated_at: 'ASC',
-    },
-  });
-}
+async findForReviewByStatus(statuses: string[]): Promise<Restaurant[]> {
+      const validStatuses = statuses.filter(s => Object.values(RestaurantStatus).includes(s as RestaurantStatus));
+      if (validStatuses.length === 0) {
+        return [];
+      }
+
+      return this.restaurantRepository.find({
+        where: {
+          status: In(validStatuses),
+        },
+        relations: ['documents'], 
+        order: {
+          updated_at: 'ASC',
+        },
+      });
+    }
+
+async getRestaurantDocument(
+        restaurantId: string,
+        documentType: string,
+    ): Promise<{ filePath: string; originalName: string; mimetype: string }> {
+        const document = await this.documentRepository.findOne({
+            where: { restaurant_id: restaurantId, document_type: documentType },
+        });
+
+        if (!document || !document.document_url) {
+            throw new NotFoundException(`Document of type ${documentType} for restaurant ${restaurantId} not found.`);
+        }
+
+        const filePath = document.document_url;
+        const fullPath = path.join(process.cwd(), filePath);
+        
+        if (!fs.existsSync(fullPath)) {
+            console.error(`File not found on server at path: ${fullPath}`);
+            throw new NotFoundException(`File for document not found on server.`);
+        }
+
+        return {
+            filePath: filePath,
+            originalName: document.original_name || 'document',
+            mimetype: document.mimetype || 'application/octet-stream',
+        };
+    }
 
 async checkOwnerStatus(ownerId: string, restaurantId: string): Promise<{ status: RestaurantStatus; rejection_reason: string | null }> {
   const restaurant = await this.restaurantRepository.findOneBy({ id: restaurantId });
@@ -284,4 +352,22 @@ async checkOwnerStatus(ownerId: string, restaurantId: string): Promise<{ status:
     rejection_reason: restaurant.rejection_reason,
   };
 }
+async getRestaurantProfileByOwnerId(ownerId: string): Promise<Restaurant> {
+        const restaurant = await this.restaurantRepository.findOne({
+            where: { owner_id: ownerId },
+            relations: [
+                'addresses',
+                'hours',
+                'documents',
+                'bank_details',
+            ],
+        });
+
+        if (!restaurant) {
+            throw new NotFoundException('No restaurant profile found for the current user.');
+        }
+
+        return restaurant;
+    }
+
 }
