@@ -10,13 +10,15 @@ import { PlatformAccount } from 'src/entities/platform-account.entity';
 import { KafkaProvider } from '../../providers/kafka.provider';
 import { JwtStrategy } from 'src/common/strategies/jwt.strategy';
 import { PayoutBatch } from 'src/entities/payout-batch.entity';
-import { PayoutItem } from 'src/entities/payout-item.entity';
+// import { PayoutItem } from 'src/entities/payout-item.entity';
+import { PayoutChild } from 'src/entities/payout-children.entity';
+import { AggregatedPayout } from 'src/entities/aggregated-payout.entity';
 import { HttpModule } from '@nestjs/axios';
 
 
 @Module({
 imports: [
-    TypeOrmModule.forFeature([Payment, RestaurantSubaccount, PlatformAccount, PayoutItem,  PayoutBatch]),
+    TypeOrmModule.forFeature([Payment, RestaurantSubaccount, PlatformAccount, PayoutBatch, PayoutChild, AggregatedPayout ]),
     
 ],
 controllers: [PaymentsController],

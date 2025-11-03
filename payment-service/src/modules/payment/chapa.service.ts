@@ -10,7 +10,7 @@ export class ChapaService {
   private secret: string;
 
   constructor() {
-    this.secret = process.env.CHAPA_SECRET!;
+    this.secret = process.env.PROD_CHAPA_SECRET!;
     this.client = axios.create({ baseURL: process.env.CHAPA_BASE_URL || 'https://api.chapa.co', timeout: 10000 });
   }
   
