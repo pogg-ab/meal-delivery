@@ -1,40 +1,31 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
 
-@Entity({ name: 'payout_items' })
-export class PayoutItem {
-  @PrimaryGeneratedColumn('uuid') id: string;
+const DecimalTransformer = {
+  to: (v: number) => v,
+  from: (v: string) => (v === null || typeof v === 'undefined' ? 0 : parseFloat(v)),
+};
+
+@Entity({ name: 'aggregated_payouts' })
+export class AggregatedPayout {
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @Index()
   @Column({ type: 'uuid', nullable: true })
   payout_batch_id?: string | null;
 
-  @Column({ type: 'uuid', nullable: true })
-  order_id?: string | null;
-
-  @Column({ type: 'uuid', nullable: true })
-  payment_id?: string | null;
-
+  @Index()
   @Column({ type: 'uuid' })
   restaurant_id: string;
-
-  @Column({ type: 'varchar', length: 255, nullable: true })
-  reason?: string; // 'promo_platform_topup' or 'promo_platform_topup_aggregated'
-
-  @Column({ type: 'uuid', nullable: true })
-  parent_item_id?: string | null; // points to aggregated item if this is a child
 
   @Column({
     type: 'decimal',
     precision: 12,
     scale: 2,
-    transformer: { to: (v: number) => v, from: (v: string) => parseFloat(v) },
+    transformer: DecimalTransformer,
   })
   amount: number;
 
-  @Column({ type: 'varchar', length: 50, default: 'pending' })
-  status: 'pending' | 'batched' | 'processing' | 'paid' | 'failed' | 'cancelled';
-
-  // bank details (copied from restaurant_subaccounts at aggregation time)
   @Column({ type: 'varchar', length: 64, nullable: true })
   account_number?: string | null;
 
@@ -49,6 +40,9 @@ export class PayoutItem {
 
   @Column({ type: 'jsonb', nullable: true })
   provider_response?: any;
+
+  @Column({ type: 'varchar', length: 50, default: 'batched' })
+  status: 'batched' | 'processing' | 'paid' | 'failed' | 'cancelled';
 
   @Column({ type: 'integer', default: 0 })
   attempt_count: number;

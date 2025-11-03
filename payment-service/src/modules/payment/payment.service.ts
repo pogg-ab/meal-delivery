@@ -9,7 +9,9 @@ import { ClientKafka } from '@nestjs/microservices';
 import { KafkaProvider } from 'src/providers/kafka.provider';
 import { CreateSubaccountDto } from './dtos/create-subaccount.dto';
 import { buildChapaFormPayload, ChapaSubaccount } from 'src/utils/chapa-form.utils';
-import { PayoutItem } from 'src/entities/payout-item.entity';
+// import { PayoutItem } from 'src/entities/payout-item.entity';
+import { AggregatedPayout } from 'src/entities/aggregated-payout.entity';
+import { PayoutChild } from 'src/entities/payout-children.entity';
 import { PayoutBatch } from 'src/entities/payout-batch.entity';
 import * as crypto from 'crypto';
 
@@ -19,8 +21,9 @@ export class PaymentsService {
   
   constructor(
     @InjectRepository(Payment) private readonly paymentRepo: Repository<Payment>,
-    @InjectRepository(PayoutItem) private readonly payoutItemRepo: Repository<PayoutItem>,
-    // @InjectRepository(PayoutBatch) private readonly paymentRepo: Repository<Payment>,
+    // @InjectRepository(PayoutItem) private readonly payoutItemRepo: Repository<PayoutItem>,
+    @InjectRepository(PayoutChild) private readonly payoutChildRepo: Repository<PayoutChild>,
+    // @InjectRepository(PayoutBatch) private readonly payoutBatchRepo: Repository<PayoutBatch>,
     @InjectRepository(RestaurantSubaccount) private readonly subRepo: Repository<RestaurantSubaccount>,
     @InjectRepository(PlatformAccount) private readonly platformRepo: Repository<PlatformAccount>, 
     private readonly dataSource: DataSource,
@@ -281,18 +284,265 @@ public async handleOrderAwaitingPayment(payload: any): Promise<Payment | null> {
 }
 
 // Paste into PaymentsService
-async handleChapaWebhook(rawBody: Buffer | undefined, signatureHeader?: string): Promise<void> {
+// async handleChapaWebhook(rawBody: Buffer | undefined, signatureHeader?: string): Promise<void> {
+//   const logger = this.logger ?? new (require('@nestjs/common').Logger)('PaymentsService');
+//   const { BadRequestException } = require('@nestjs/common');
+//   const crypto = require('crypto');
+
+//   const secret = process.env.CHAPA_WEBHOOK_SECRET;
+//   if (!secret) {
+//     logger.error('CHAPA_WEBHOOK_SECRET not configured');
+//     throw new Error('Server misconfiguration');
+//   }
+
+//   // Validate raw body & signature header presence
+//   if (!rawBody || !(rawBody instanceof Buffer)) {
+//     logger.warn('Missing rawBody in webhook request');
+//     throw new BadRequestException('raw body required');
+//   }
+//   if (!signatureHeader) {
+//     logger.warn('Missing signature header');
+//     throw new BadRequestException('signature header required');
+//   }
+
+//   // Normalize signature header (support "sha256=..." prefix)
+//   let sigToken = signatureHeader.trim();
+//   if (/^sha256=/i.test(sigToken)) sigToken = sigToken.split('=')[1];
+
+//   // Compute HMAC and verify
+//   const computed = crypto.createHmac('sha256', secret).update(rawBody).digest();
+//   let sigBuf: Buffer | null = null;
+//   if (/^[0-9a-f]{64}$/i.test(sigToken)) {
+//     sigBuf = Buffer.from(sigToken, 'hex');
+//   } else {
+//     try {
+//       sigBuf = Buffer.from(sigToken, 'base64');
+//     } catch {
+//       sigBuf = null;
+//     }
+//   }
+//   if (!sigBuf) {
+//     logger.warn('Unable to parse signature header (not hex or base64)');
+//     throw new BadRequestException('invalid signature format');
+//   }
+//   if (sigBuf.length !== computed.length) {
+//     logger.warn('Signature length mismatch', { expected: computed.length, got: sigBuf.length });
+//     throw new BadRequestException('invalid signature');
+//   }
+//   if (!crypto.timingSafeEqual(computed, sigBuf)) {
+//     logger.warn('Invalid webhook signature (timingSafeEqual failed)');
+//     throw new BadRequestException('Invalid webhook signature');
+//   }
+
+//   // Parse payload
+//   let payload: any;
+//   try {
+//     payload = JSON.parse(rawBody.toString('utf8'));
+//   } catch (e) {
+//     logger.error('Failed to parse webhook JSON', e?.message ?? e);
+//     throw new BadRequestException('invalid json');
+//   }
+
+//   logger.log('Valid webhook received');
+//   logger.debug('webhook payload:', payload);
+
+//   // Accept multiple shapes for tx_ref
+//   const tx_ref = payload?.tx_ref ?? payload?.data?.tx_ref ?? payload?.data?.reference ?? null;
+//   if (!tx_ref) {
+//     logger.warn('tx_ref missing in webhook payload', payload);
+//     throw new BadRequestException('tx_ref missing');
+//   }
+
+//   // Find saved payment by tx_ref
+//   const payment = await this.paymentRepo.findOne({ where: { tx_ref } });
+//   if (!payment) {
+//     logger.warn(`No payment found for tx_ref ${tx_ref}`);
+//     // ack webhook but do nothing else
+//     return;
+//   }
+
+//   // Idempotent: ignore already-paid
+//   if (payment.status === 'paid') {
+//     logger.log(`Webhook for already-paid payment ${tx_ref} ignored`);
+//     return;
+//   }
+
+//   // Verify transaction with Chapa
+//   let verifyResp: any;
+//   try {
+//     verifyResp = await this.chapa.verifyTransaction(tx_ref);
+//   } catch (err: any) {
+//     logger.error('Chapa verify failed', err?.response?.data ?? err?.message ?? err);
+//     // don't change DB state on verify failure; allow retries
+//     return;
+//   }
+
+//   logger.debug('Chapa verify response', verifyResp);
+
+//   // Normalize status
+//   const statusRaw = verifyResp?.data?.status ?? verifyResp?.status ?? null;
+//   const status = typeof statusRaw === 'string' ? statusRaw.toLowerCase() : null;
+
+//   if (status === 'success' || status === 'paid' || status === 'ok') {
+//     // Mark payment paid
+//     payment.status = 'paid';
+//     payment.chapa_tx_id = verifyResp?.data?.id ?? payment.chapa_tx_id;
+//     payment.payment_data = verifyResp;
+//     payment.paid_at = new Date();
+//     await this.paymentRepo.save(payment);
+
+//     // Emit payment.success eventngotngron
+//     try {
+//       await this.kafka.emit('payment.success', {
+//         order_id: payment.order_id,
+//         tx_ref: payment.tx_ref,
+//         chapa_tx_id: payment.chapa_tx_id,
+//         amount: payment.amount,
+//         payment_data: verifyResp,
+//       });
+//     } catch (e) {
+//       logger.warn('Failed to emit payment.success', e?.message ?? e);
+//     }
+
+//     // ----------------------------
+//     // Determine platformTopupNeeded and restaurantId — NO Catalog fetch
+//     // Priority:
+//     // 1) verifyResp.data.meta (Chapa verify payload)
+//     // 2) verifyResp.meta
+//     // 3) payment.payment_data.initResp.meta (what we saved when initiating)
+//     // 4) payment.payment_data.platform_topup_needed / payment.payment_data.restaurant_id
+//     // ----------------------------
+//     const metaFromVerify =
+//       verifyResp?.data?.meta ??
+//       verifyResp?.meta ??
+//       verifyResp?.data?.data?.meta ??
+//       null;
+
+//     let platformTopupNeeded: any = metaFromVerify?.platform_topup_needed ?? null;
+//     let restaurantIdFromMeta: string | null = metaFromVerify?.restaurant_id ?? null;
+
+//     if (!platformTopupNeeded) {
+//       platformTopupNeeded =
+//         payment.payment_data?.initResp?.meta?.platform_topup_needed ??
+//         payment.payment_data?.platform_topup_needed ??
+//         null;
+//     }
+//     if (!restaurantIdFromMeta) {
+//       restaurantIdFromMeta =
+//         payment.payment_data?.initResp?.meta?.restaurant_id ??
+//         payment.payment_data?.restaurant_id ??
+//         null;
+//     }
+
+//     // Normalize platformTopupNeeded
+//     if (typeof platformTopupNeeded === 'string') {
+//       const parsed = Number(platformTopupNeeded);
+//       platformTopupNeeded = Number.isFinite(parsed) ? parsed : null;
+//     }
+//     if (platformTopupNeeded !== null) platformTopupNeeded = Number(platformTopupNeeded);
+
+//     const restaurantId = restaurantIdFromMeta ?? null;
+
+//     // If there's a platform top-up > 0, create payout item with bank details (if available)
+//     if (platformTopupNeeded && Number(platformTopupNeeded) > 0) {
+//       // Idempotency check
+//       const existingPayout = await this.payoutChildRepo.findOne({
+//         where: { order_id: payment.order_id, reason: 'promo_platform_topup' },
+//       });
+
+//       if (!existingPayout) {
+//         if (!restaurantId) {
+//           logger.warn(
+//             `Platform topup needed (${platformTopupNeeded}) for order ${payment.order_id} but restaurant_id is missing in webhook/meta/payment_data — skipping payout item creation.`,
+//           );
+//         } else {
+//           // Fetch restaurant subaccount to copy bank details (if exists)
+//           let subRec: any = null;
+//           try {
+//             if (!this.subRepo) {
+//               logger.warn('Restaurant subRepo not available on PaymentsService; cannot fetch bank details.');
+//             } else {
+//               subRec = await this.subRepo.findOne({ where: { restaurant_id: restaurantId } });
+//             }
+//           } catch (e) {
+//             logger.warn('Failed fetching restaurant subaccount for bank details', (e as any)?.message ?? e);
+//             subRec = null;
+//           }
+
+//           // Build payout item payload, copying bank details if present
+//           const piPayload: any = {
+//             order_id: payment.order_id,
+//             payment_id: payment.id,
+//             restaurant_id: restaurantId,
+//             amount: Number(platformTopupNeeded),
+//             status: 'pending',
+//             reason: 'promo_platform_topup',
+//             meta: { tx_ref: payment.tx_ref, created_via: 'chapa_webhook' },
+//           };
+
+//           if (subRec) {
+//             piPayload.account_number = subRec.account_number ?? null;
+//             piPayload.account_name = subRec.account_name ?? null;
+//             piPayload.bank_code = subRec.bank_code ?? null;
+//           } else {
+//             // keep them null if subaccount not found — admin should populate later
+//             piPayload.account_number = null;
+//             piPayload.account_name = null;
+//             piPayload.bank_code = null;
+//           }
+
+//           // Persist payout item (normalize save result)
+//           // const piEntity = this.payoutItemRepo.create(piPayload as any);
+//           // const savedResult = await this.payoutItemRepo.save(piEntity);
+//           const piEntity = this.payoutChildRepo.create(piPayload as any);
+//           const savedResult = await this.payoutChildRepo.save(piEntity);
+//           const savedPi = Array.isArray(savedResult) ? savedResult[0] : savedResult;
+
+//           // logger.log(`Created payout_item ${savedPi.id} for order ${payment.order_id} amount=${savedPi.amount} (bank: ${savedPi.account_number ?? 'none'})`);
+//           logger.log(`Created payout_item ${savedPi.id} for order ${payment.order_id} amount=${savedPi.amount}`);
+//         }
+//       } else {
+//         logger.log(`PayoutItem already exists for order ${payment.order_id}, skipping creation`);
+//       }
+//     } else {
+//       logger.debug(`No platform_topup_needed for order ${payment.order_id} (value: ${platformTopupNeeded})`);
+//     }
+
+//     return;
+//   }
+
+//   // non-success: mark payment failed and emit event
+//   payment.status = 'failed';
+//   payment.payment_data = verifyResp;
+//   await this.paymentRepo.save(payment);
+
+//   try {
+//     await this.kafka.emit('payment.failed', {
+//       order_id: payment.order_id,
+//       tx_ref: payment.tx_ref,
+//       reason: 'chapa_status_not_success',
+//       payment_data: verifyResp,
+//     });
+//   } catch (e) {
+//     logger.warn('Failed to emit payment.failed', e?.message ?? e);
+//   }
+
+//   return;
+// }
+
+//Handle webhook
+ async handleChapaWebhook(rawBody: Buffer | undefined, signatureHeader?: string): Promise<void> {
   const logger = this.logger ?? new (require('@nestjs/common').Logger)('PaymentsService');
   const { BadRequestException } = require('@nestjs/common');
   const crypto = require('crypto');
 
-  const secret = process.env.CHAPA_WEBHOOK_SECRET;
+  // 1) signature verification (HMAC SHA256)
+  // const secret = process.env.CHAPA_WEBHOOK_SECRET;
+  const secret = process.env.PROD_CHAPA_SECRET;
   if (!secret) {
     logger.error('CHAPA_WEBHOOK_SECRET not configured');
     throw new Error('Server misconfiguration');
   }
-
-  // Validate raw body & signature header presence
   if (!rawBody || !(rawBody instanceof Buffer)) {
     logger.warn('Missing rawBody in webhook request');
     throw new BadRequestException('raw body required');
@@ -302,36 +552,26 @@ async handleChapaWebhook(rawBody: Buffer | undefined, signatureHeader?: string):
     throw new BadRequestException('signature header required');
   }
 
-  // Normalize signature header (support "sha256=..." prefix)
   let sigToken = signatureHeader.trim();
   if (/^sha256=/i.test(sigToken)) sigToken = sigToken.split('=')[1];
 
-  // Compute HMAC and verify
   const computed = crypto.createHmac('sha256', secret).update(rawBody).digest();
   let sigBuf: Buffer | null = null;
-  if (/^[0-9a-f]{64}$/i.test(sigToken)) {
-    sigBuf = Buffer.from(sigToken, 'hex');
-  } else {
-    try {
-      sigBuf = Buffer.from(sigToken, 'base64');
-    } catch {
-      sigBuf = null;
-    }
+  if (/^[0-9a-f]{64}$/i.test(sigToken)) sigBuf = Buffer.from(sigToken, 'hex');
+  else {
+    try { sigBuf = Buffer.from(sigToken, 'base64'); } catch (e) { sigBuf = null; }
   }
+
   if (!sigBuf) {
     logger.warn('Unable to parse signature header (not hex or base64)');
     throw new BadRequestException('invalid signature format');
   }
-  if (sigBuf.length !== computed.length) {
-    logger.warn('Signature length mismatch', { expected: computed.length, got: sigBuf.length });
-    throw new BadRequestException('invalid signature');
-  }
-  if (!crypto.timingSafeEqual(computed, sigBuf)) {
+  if (sigBuf.length !== computed.length || !crypto.timingSafeEqual(computed, sigBuf)) {
     logger.warn('Invalid webhook signature (timingSafeEqual failed)');
     throw new BadRequestException('Invalid webhook signature');
   }
 
-  // Parse payload
+  // 2) parse payload
   let payload: any;
   try {
     payload = JSON.parse(rawBody.toString('utf8'));
@@ -340,189 +580,276 @@ async handleChapaWebhook(rawBody: Buffer | undefined, signatureHeader?: string):
     throw new BadRequestException('invalid json');
   }
 
-  logger.log('Valid webhook received');
+  logger.log('Valid webhook received from Chapa');
   logger.debug('webhook payload:', payload);
 
-  // Accept multiple shapes for tx_ref
+  // 3) detect event type (payment vs transfer)
   const tx_ref = payload?.tx_ref ?? payload?.data?.tx_ref ?? payload?.data?.reference ?? null;
-  if (!tx_ref) {
-    logger.warn('tx_ref missing in webhook payload', payload);
-    throw new BadRequestException('tx_ref missing');
-  }
+  const isPaymentEvent = Boolean(tx_ref) || (typeof payload?.event === 'string' && payload.event.toLowerCase().includes('charge'));
+  const hasTransferResults = Array.isArray(payload?.results) || Boolean(payload?.data?.id) || Boolean(payload?.transfer) || Boolean(payload?.transfer_id);
 
-  // Find saved payment by tx_ref
-  const payment = await this.paymentRepo.findOne({ where: { tx_ref } });
-  if (!payment) {
-    logger.warn(`No payment found for tx_ref ${tx_ref}`);
-    // ack webhook but do nothing else
-    return;
-  }
-
-  // Idempotent: ignore already-paid
-  if (payment.status === 'paid') {
-    logger.log(`Webhook for already-paid payment ${tx_ref} ignored`);
-    return;
-  }
-
-  // Verify transaction with Chapa
-  let verifyResp: any;
-  try {
-    verifyResp = await this.chapa.verifyTransaction(tx_ref);
-  } catch (err: any) {
-    logger.error('Chapa verify failed', err?.response?.data ?? err?.message ?? err);
-    // don't change DB state on verify failure; allow retries
-    return;
-  }
-
-  logger.debug('Chapa verify response', verifyResp);
-
-  // Normalize status
-  const statusRaw = verifyResp?.data?.status ?? verifyResp?.status ?? null;
-  const status = typeof statusRaw === 'string' ? statusRaw.toLowerCase() : null;
-
-  if (status === 'success' || status === 'paid' || status === 'ok') {
-    // Mark payment paid
-    payment.status = 'paid';
-    payment.chapa_tx_id = verifyResp?.data?.id ?? payment.chapa_tx_id;
-    payment.payment_data = verifyResp;
-    payment.paid_at = new Date();
-    await this.paymentRepo.save(payment);
-
-    // Emit payment.success event
+  // ---------- PAYMENT FLOW ----------
+  if (isPaymentEvent) {
     try {
-      await this.kafka.emit('payment.success', {
-        order_id: payment.order_id,
-        tx_ref: payment.tx_ref,
-        chapa_tx_id: payment.chapa_tx_id,
-        amount: payment.amount,
-        payment_data: verifyResp,
-      });
-    } catch (e) {
-      logger.warn('Failed to emit payment.success', e?.message ?? e);
-    }
-
-    // ----------------------------
-    // Determine platformTopupNeeded and restaurantId — NO Catalog fetch
-    // Priority:
-    // 1) verifyResp.data.meta (Chapa verify payload)
-    // 2) verifyResp.meta
-    // 3) payment.payment_data.initResp.meta (what we saved when initiating)
-    // 4) payment.payment_data.platform_topup_needed / payment.payment_data.restaurant_id
-    // ----------------------------
-    const metaFromVerify =
-      verifyResp?.data?.meta ??
-      verifyResp?.meta ??
-      verifyResp?.data?.data?.meta ??
-      null;
-
-    let platformTopupNeeded: any = metaFromVerify?.platform_topup_needed ?? null;
-    let restaurantIdFromMeta: string | null = metaFromVerify?.restaurant_id ?? null;
-
-    if (!platformTopupNeeded) {
-      platformTopupNeeded =
-        payment.payment_data?.initResp?.meta?.platform_topup_needed ??
-        payment.payment_data?.platform_topup_needed ??
-        null;
-    }
-    if (!restaurantIdFromMeta) {
-      restaurantIdFromMeta =
-        payment.payment_data?.initResp?.meta?.restaurant_id ??
-        payment.payment_data?.restaurant_id ??
-        null;
-    }
-
-    // Normalize platformTopupNeeded
-    if (typeof platformTopupNeeded === 'string') {
-      const parsed = Number(platformTopupNeeded);
-      platformTopupNeeded = Number.isFinite(parsed) ? parsed : null;
-    }
-    if (platformTopupNeeded !== null) platformTopupNeeded = Number(platformTopupNeeded);
-
-    const restaurantId = restaurantIdFromMeta ?? null;
-
-    // If there's a platform top-up > 0, create payout item with bank details (if available)
-    if (platformTopupNeeded && Number(platformTopupNeeded) > 0) {
-      // Idempotency check
-      const existingPayout = await this.payoutItemRepo.findOne({
-        where: { order_id: payment.order_id, reason: 'promo_platform_topup' },
-      });
-
-      if (!existingPayout) {
-        if (!restaurantId) {
-          logger.warn(
-            `Platform topup needed (${platformTopupNeeded}) for order ${payment.order_id} but restaurant_id is missing in webhook/meta/payment_data — skipping payout item creation.`,
-          );
-        } else {
-          // Fetch restaurant subaccount to copy bank details (if exists)
-          let subRec: any = null;
-          try {
-            if (!this.subRepo) {
-              logger.warn('Restaurant subRepo not available on PaymentsService; cannot fetch bank details.');
-            } else {
-              subRec = await this.subRepo.findOne({ where: { restaurant_id: restaurantId } });
-            }
-          } catch (e) {
-            logger.warn('Failed fetching restaurant subaccount for bank details', (e as any)?.message ?? e);
-            subRec = null;
-          }
-
-          // Build payout item payload, copying bank details if present
-          const piPayload: any = {
-            order_id: payment.order_id,
-            payment_id: payment.id,
-            restaurant_id: restaurantId,
-            amount: Number(platformTopupNeeded),
-            status: 'pending',
-            reason: 'promo_platform_topup',
-            meta: { tx_ref: payment.tx_ref, created_via: 'chapa_webhook' },
-          };
-
-          if (subRec) {
-            piPayload.account_number = subRec.account_number ?? null;
-            piPayload.account_name = subRec.account_name ?? null;
-            piPayload.bank_code = subRec.bank_code ?? null;
-          } else {
-            // keep them null if subaccount not found — admin should populate later
-            piPayload.account_number = null;
-            piPayload.account_name = null;
-            piPayload.bank_code = null;
-          }
-
-          // Persist payout item (normalize save result)
-          const piEntity = this.payoutItemRepo.create(piPayload as any);
-          const savedResult = await this.payoutItemRepo.save(piEntity);
-          const savedPi = Array.isArray(savedResult) ? savedResult[0] : savedResult;
-
-          logger.log(`Created payout_item ${savedPi.id} for order ${payment.order_id} amount=${savedPi.amount} (bank: ${savedPi.account_number ?? 'none'})`);
-        }
-      } else {
-        logger.log(`PayoutItem already exists for order ${payment.order_id}, skipping creation`);
+      const txRef = tx_ref;
+      if (!txRef) {
+        logger.warn('Payment webhook missing tx_ref; ignoring payment path');
+        return;
       }
-    } else {
-      logger.debug(`No platform_topup_needed for order ${payment.order_id} (value: ${platformTopupNeeded})`);
+
+      // find payment record
+      const payment = await this.paymentRepo.findOne({ where: { tx_ref: txRef } });
+      if (!payment) {
+        logger.warn(`No payment found for tx_ref ${txRef}; ignoring`);
+        return;
+      }
+
+      if (payment.status === 'paid') {
+        logger.log(`Payment ${txRef} already paid; ignoring webhook`);
+        return;
+      }
+
+      // verify transaction with Chapa (best-practice)
+      let verifyResp: any = null;
+      try {
+        verifyResp = await this.chapa.verifyTransaction(txRef);
+      } catch (e) {
+        logger.error('Chapa verifyTransaction failed', e?.message ?? e);
+        // don't change DB state on verify error; ack webhook
+        return;
+      }
+
+      const statusRaw = verifyResp?.data?.status ?? verifyResp?.status ?? payload?.status ?? '';
+      const status = String(statusRaw).toLowerCase();
+
+      if (['success', 'paid', 'completed'].includes(status)) {
+        // mark payment paid
+        payment.status = 'paid';
+        payment.chapa_tx_id = verifyResp?.data?.id ?? payment.chapa_tx_id;
+        payment.payment_data = verifyResp;
+        payment.paid_at = new Date();
+        await this.paymentRepo.save(payment);
+
+        // emit payment.success event (existing behavior)
+        try {
+          await this.kafka.emit('payment.success', {
+            order_id: payment.order_id,
+            tx_ref: payment.tx_ref,
+            chapa_tx_id: payment.chapa_tx_id,
+            amount: payment.amount,
+            payment_data: verifyResp,
+          });
+        } catch (e) {
+          logger.warn('Failed to emit payment.success', e?.message ?? e);
+        }
+
+        // If platform_topup_needed present, create a payout child (idempotent)
+        const platformTopup =
+          Number(
+            verifyResp?.data?.meta?.platform_topup_needed ??
+              verifyResp?.meta?.platform_topup_needed ??
+              payment.payment_data?.initResp?.meta?.platform_topup_needed ??
+              payment.payment_data?.platform_topup_needed ??
+              0,
+          ) || 0;
+
+        if (platformTopup > 0) {
+          // Determine restaurant_id from available meta spots (we DO NOT query catalog)
+          const restaurantId =
+            verifyResp?.data?.meta?.restaurant_id ??
+            verifyResp?.meta?.restaurant_id ??
+            payment.payment_data?.initResp?.meta?.restaurant_id ??
+            payment.payment_data?.meta?.restaurant_id ??
+            null;
+
+          if (!restaurantId) {
+            logger.warn(`Cannot create payout child for order ${payment.order_id}: restaurant_id missing in payment meta`);
+          } else {
+            // Idempotency: ensure we don't create duplicate child for the same order+reason
+            const existing = await this.payoutChildRepo.findOne({
+              where: { order_id: payment.order_id, reason: 'promo_platform_topup' },
+            });
+            if (existing) {
+              logger.log(`Payout child already exists for order ${payment.order_id} (id=${existing.id}), skipping creation`);
+            } else {
+              const childEntity = this.payoutChildRepo.create({
+                order_id: payment.order_id,
+                payment_id: payment.id,
+                restaurant_id: restaurantId,
+                amount: platformTopup,
+                status: 'pending',
+                reason: 'promo_platform_topup',
+                meta: { tx_ref: payment.tx_ref, created_from: 'webhook' },
+              } as any);
+
+              const savedRaw = await this.payoutChildRepo.save(childEntity);
+              const savedChild = Array.isArray(savedRaw) ? (savedRaw as any)[0] : (savedRaw as any);
+              logger.log(`Created payout_child ${savedChild.id} for order ${payment.order_id} amount=${savedChild.amount}`);
+            }
+          }
+        }
+
+        return;
+      } else {
+        // non-success -> mark failed and emit
+        payment.status = 'failed';
+        payment.payment_data = verifyResp ?? payload;
+        await this.paymentRepo.save(payment);
+
+        try {
+          await this.kafka.emit('payment.failed', {
+            order_id: payment.order_id,
+            tx_ref: payment.tx_ref,
+            reason: 'chapa_status_not_success',
+            payment_data: verifyResp ?? payload,
+          });
+        } catch (e) {
+          logger.warn('Failed to emit payment.failed', e?.message ?? e);
+        }
+        return;
+      }
+    } catch (err) {
+      logger.error('Error handling payment webhook', err?.message ?? err);
+      return;
     }
+  }
+
+  // ---------- BULK TRANSFER / AGGREGATED PAYOUT FLOW ----------
+  if (hasTransferResults) {
+    // normalize results array from several possible shapes
+    const results: any[] = [];
+    if (Array.isArray(payload?.results)) results.push(...payload.results);
+    else if (Array.isArray(payload?.data?.results)) results.push(...payload.data.results);
+    else if (payload?.data && payload.data.id) results.push(payload.data);
+    else if (payload?.transfer) results.push(payload.transfer);
+    else if (payload?.id || payload?.transfer_id) results.push(payload);
+
+    if (results.length === 0) {
+      logger.warn('Bulk webhook contained no transfer results; ignoring');
+      return;
+    }
+
+    for (const r of results) {
+      const providerTransferId = r.transfer_id ?? r.id ?? r.tx_id ?? null;
+      const reference = r.reference ?? r.metadata?.payout_item_id ?? r.metadata?.reference ?? null;
+      const statusRaw = (r.status ?? r.state ?? r.result ?? '').toString().toLowerCase();
+      const isSuccess = ['success', 'paid', 'completed'].includes(statusRaw);
+      const isFailed = ['failed', 'error', 'rejected', 'cancelled'].includes(statusRaw);
+      const fee = r.fee ? Number(r.fee) : null;
+      const error = r.error ?? r.failure_reason ?? null;
+      const providerBatchId = payload.provider_batch_id ?? payload.data?.provider_batch_id ?? payload.batch_id ?? null;
+
+      try {
+        await this.dataSource.transaction(async (manager) => {
+          const aggRepo = manager.getRepository(AggregatedPayout);
+          const childRepo = manager.getRepository(PayoutChild);
+          const batchRepo = manager.getRepository(PayoutBatch);
+
+          // locate aggregated payout (prefer provider_transfer_id, then reference/payout_item_id)
+          let agg: any = null;
+          if (providerTransferId) {
+            agg = await aggRepo.findOne({ where: { provider_transfer_id: providerTransferId } });
+          }
+          if (!agg && reference) {
+            agg = await aggRepo.findOne({ where: { id: reference } }).catch(() => null);
+          }
+          if (!agg && r.metadata?.payout_item_id) {
+            agg = await aggRepo.findOne({ where: { id: r.metadata.payout_item_id } }).catch(() => null);
+          }
+
+          if (!agg) {
+            logger.warn(`No aggregated_payout found for transfer providerTransferId=${providerTransferId} reference=${reference}`);
+            return;
+          }
+
+          // idempotency: if already in final state and matches, skip
+          if (agg.status === 'paid' && isSuccess) {
+            logger.log(`Aggregated payout ${agg.id} already paid; skipping`);
+            return;
+          }
+
+          // prepare update
+          const updateObj: any = { provider_response: r, provider_transfer_id: providerTransferId ?? agg.provider_transfer_id ?? null };
+          if (isSuccess) { updateObj.status = 'paid'; updateObj.last_error = null; }
+          else if (isFailed) { updateObj.status = 'failed'; updateObj.last_error = String(error ?? 'provider_failed'); }
+          else { updateObj.status = 'processing'; }
+
+          await aggRepo.update({ id: agg.id }, updateObj);
+
+          // refresh agg to read meta.child_ids
+          const freshAgg = await aggRepo.findOne({ where: { id: agg.id } });
+          if (!freshAgg) {
+            logger.warn(`Aggregated payout ${agg.id} disappeared after update; skipping children update`);
+            return;
+          }
+
+          const childIds: string[] = Array.isArray(freshAgg.meta?.child_ids) ? freshAgg.meta.child_ids : [];
+
+          if (childIds && childIds.length) {
+            if (isSuccess) {
+              await childRepo
+                .createQueryBuilder()
+                .update()
+                .set({ status: 'paid', meta: () => `jsonb_set(coalesce(meta,'{}'::jsonb), '{paid_via}', to_jsonb('${providerTransferId ?? ''}'))` })
+                .where('id = ANY(:ids)', { ids: childIds })
+                .execute();
+            } else if (isFailed) {
+              await childRepo
+                .createQueryBuilder()
+                .update()
+                .set({ status: 'failed', meta: () => `jsonb_set(coalesce(meta,'{}'::jsonb), '{last_error}', to_jsonb('${String(error ?? 'provider_failed')}'))` })
+                .where('id = ANY(:ids)', { ids: childIds })
+                .execute();
+            } else {
+              // processing -> leave child status as-is (batched)
+            }
+          }
+
+          // update parent batch summary if present
+          if (freshAgg.payout_batch_id) {
+            const batch = await batchRepo.findOne({ where: { id: freshAgg.payout_batch_id } });
+            if (batch) {
+              const aggRows = await aggRepo.find({ where: { payout_batch_id: batch.id } });
+              const allPaid = aggRows.every((aa) => aa.status === 'paid');
+              const anyFailed = aggRows.some((aa) => aa.status === 'failed');
+              batch.status = allPaid ? 'completed' : anyFailed ? 'failed' : 'processing';
+              batch.total_amount = aggRows.reduce((s, it) => s + Number(it.amount ?? 0), 0);
+              batch.processed_at = allPaid || anyFailed ? new Date() : batch.processed_at;
+              batch.meta = { ...(batch.meta ?? {}), last_provider_callback: new Date().toISOString(), provider_batch_id: providerBatchId ?? batch.provider_batch_id };
+              await batchRepo.save(batch);
+
+              try {
+                await this.kafka.emit('payout.batch.updated', { batch_id: batch.id, status: batch.status, provider_batch_id: batch.provider_batch_id });
+              } catch (e) {
+                logger.warn('Failed emit payout.batch.updated', e?.message ?? e);
+              }
+            }
+          }
+
+          // emit per-agg event
+          try {
+            if (isSuccess) await this.kafka.emit('payout.item.paid', { payout_item_id: freshAgg.id, restaurant_id: freshAgg.restaurant_id, amount: freshAgg.amount, provider_transfer_id: providerTransferId, fee });
+            else if (isFailed) await this.kafka.emit('payout.item.failed', { payout_item_id: freshAgg.id, restaurant_id: freshAgg.restaurant_id, amount: freshAgg.amount, error });
+            else await this.kafka.emit('payout.item.updated', { payout_item_id: freshAgg.id, status: updateObj.status });
+          } catch (e) {
+            logger.warn('Failed to emit payout.item event', e?.message ?? e);
+          }
+        }); // end transaction for this result
+      } catch (txErr) {
+        logger.error('Failed to process transfer result in transaction', txErr?.message ?? txErr, { result: r });
+        // swallow and continue so webhook can be acked; provider may retry
+        continue;
+      }
+    } // end for results
 
     return;
   }
 
-  // non-success: mark payment failed and emit event
-  payment.status = 'failed';
-  payment.payment_data = verifyResp;
-  await this.paymentRepo.save(payment);
-
-  try {
-    await this.kafka.emit('payment.failed', {
-      order_id: payment.order_id,
-      tx_ref: payment.tx_ref,
-      reason: 'chapa_status_not_success',
-      payment_data: verifyResp,
-    });
-  } catch (e) {
-    logger.warn('Failed to emit payment.failed', e?.message ?? e);
-  }
-
+  // neither path matched
+  logger.warn('Webhook payload did not match payment or transfer shapes; ignoring');
   return;
 }
+
 
   // --- create/update platform account (internal) ---
   async createOrUpdatePlatformAccount(dto: CreateSubaccountDto) {
@@ -642,104 +969,78 @@ async createSubaccountInternal(restaurant_id: string, payload: CreateSubaccountD
   }
 
 //Create Aggregate payout
-async createAggregatedBatch(opts: {
-  olderThan?: Date;
-  restaurantIds?: string[];
-  minTotal?: number;
-  createdBy: string;
-}): Promise<PayoutBatch> {
+async createAggregatedBatch(opts: { olderThan?: Date; restaurantIds?: string[]; minTotal?: number; createdBy: string }) {
   return this.dataSource.transaction(async (manager) => {
-    const payoutItemRepo = manager.getRepository(PayoutItem);
+    const childRepo = manager.getRepository(PayoutChild);
+    const aggRepo = manager.getRepository(AggregatedPayout);
     const batchRepo = manager.getRepository(PayoutBatch);
     const subRepo = manager.getRepository(RestaurantSubaccount);
 
-    // create batch record
-    const batchEntity = batchRepo.create({
-      status: 'created',
-      total_amount: 0,
-      meta: { created_by: opts.createdBy },
-    } as any);
+    // create batch
+    const batchEntity = batchRepo.create({ status: 'created', total_amount: 0, meta: { created_by: opts.createdBy } } as any);
+    const savedBatchRaw = await batchRepo.save(batchEntity);
+    // normalize save() return (some drivers/typing may return entity or [entity])
+    const savedBatch: PayoutBatch = Array.isArray(savedBatchRaw) ? (savedBatchRaw as any)[0] : (savedBatchRaw as any);
 
-    // save may return entity or array (handle both)
-    const savedBatchRes = await batchRepo.save(batchEntity);
-    const savedBatch = Array.isArray(savedBatchRes) ? savedBatchRes[0] : savedBatchRes;
+    // build query grouping children by restaurant
+    let qb = childRepo
+      .createQueryBuilder('pc')
+      .select('pc.restaurant_id', 'restaurant_id')
+      .addSelect('ARRAY_AGG(pc.id)', 'child_ids')
+      .addSelect('SUM(pc.amount)', 'total_amount')
+      .where("pc.status = 'pending' AND pc.reason = 'promo_platform_topup'")
+      .groupBy('pc.restaurant_id');
 
-    // build query to group pending promo_topup items by restaurant
-    const qb = payoutItemRepo
-      .createQueryBuilder('pi')
-      .select('pi.restaurant_id', 'restaurant_id')
-      .addSelect('ARRAY_AGG(pi.id)', 'child_ids')
-      .addSelect('SUM(pi.amount)', 'total_amount')
-      .where("pi.status = 'pending' AND pi.reason = 'promo_platform_topup'")
-      .groupBy('pi.restaurant_id');
-
-    if (opts.olderThan) qb.andWhere('pi.created_at <= :olderThan', { olderThan: opts.olderThan });
-    if (opts.restaurantIds && opts.restaurantIds.length) qb.andWhere('pi.restaurant_id IN (:...rids)', { rids: opts.restaurantIds });
+    if (opts.olderThan) qb = qb.andWhere('pc.created_at <= :olderThan', { olderThan: opts.olderThan });
+    if (opts.restaurantIds && opts.restaurantIds.length) qb = qb.andWhere('pc.restaurant_id IN (:...rids)', { rids: opts.restaurantIds });
 
     const rawRows: any[] = await qb.getRawMany();
 
-    // normalize rows: ensure child_ids is an array of strings and total_amount is a number
+    // normalize rows
     const rows = rawRows.map((r) => {
-      // child_ids may come as string like "{id1,id2}" depending on driver — normalize to string[]
       let child_ids: string[] = [];
-      if (Array.isArray(r.child_ids)) {
-        child_ids = r.child_ids;
-      } else if (typeof r.child_ids === 'string') {
-        // strip braces and split by comma, handle empty gracefully
-        const trimmed = r.child_ids.replace(/^{|}$/g, '');
-        child_ids = trimmed.length ? trimmed.split(',').map((s: string) => s.trim()) : [];
-      } else {
-        child_ids = [];
+      if (Array.isArray(r.child_ids)) child_ids = r.child_ids;
+      else if (typeof r.child_ids === 'string') {
+        const t = r.child_ids.replace(/^{|}$/g, '').trim();
+        child_ids = t.length ? t.split(',').map((s: string) => s.trim()) : [];
       }
-
-      // total_amount may be string (from DB) or number
-      const total_amount = Number(r.total_amount ?? 0);
-
-      return {
-        restaurant_id: String(r.restaurant_id),
-        child_ids,
-        total_amount,
-      };
+      return { restaurant_id: String(r.restaurant_id), child_ids, total_amount: Number(r.total_amount ?? 0) };
     });
 
     let total = 0;
 
     for (const r of rows) {
       const t = Number(r.total_amount);
-      if (opts.minTotal && t < opts.minTotal) continue; // skip small totals
+      if (opts.minTotal && t < opts.minTotal) continue;
 
-      // fetch restaurant bank details
+      // fetch bank/subaccount for restaurant
       const sub = await subRepo.findOne({ where: { restaurant_id: r.restaurant_id } });
-      if (!sub || !sub.account_number || !sub.bank_code || !sub.account_name) {
-        // skip restaurants lacking bank details; admin must fix
-        this.logger?.warn?.(`Skipping restaurant ${r.restaurant_id} - missing bank/subaccount details`);
+      if (!sub || !sub.account_number || !sub.account_name || !sub.bank_code) {
+        this.logger.warn(`Skipping restaurant ${r.restaurant_id} - missing bank/subaccount details`);
         continue;
       }
 
-      // create aggregated payout item
-      const aggEntity = payoutItemRepo.create({
+      // create aggregated payout (parent)
+      const aggEntity = aggRepo.create({
         payout_batch_id: savedBatch.id,
-        order_id: null,
         restaurant_id: r.restaurant_id,
         amount: t,
         status: 'batched',
-        reason: 'promo_platform_topup_aggregated',
         account_number: sub.account_number,
         account_name: sub.account_name,
         bank_code: sub.bank_code,
-        meta: { child_item_ids: r.child_ids },
+        meta: { child_ids: r.child_ids },
       } as any);
 
-      // save and normalize save return (could be entity or array)
-      const savedAggRes = await payoutItemRepo.save(aggEntity);
-      const savedAgg = Array.isArray(savedAggRes) ? savedAggRes[0] : savedAggRes;
+      const savedAggRaw = await aggRepo.save(aggEntity);
+      const savedAgg: AggregatedPayout = Array.isArray(savedAggRaw) ? (savedAggRaw as any)[0] : (savedAggRaw as any);
 
-      // update child items to link to aggregated item
+      // link children to parent (use savedAgg.id which is now guaranteed)
       if (r.child_ids && r.child_ids.length) {
-        await payoutItemRepo
+        await childRepo
           .createQueryBuilder()
           .update()
-          .set({ status: 'batched', payout_batch_id: savedBatch.id, parent_item_id: savedAgg.id })
+          .set({ status: 'batched', parent_aggregate_id: savedAgg.id })
           .where('id = ANY(:ids)', { ids: r.child_ids })
           .execute();
       }
@@ -747,14 +1048,15 @@ async createAggregatedBatch(opts: {
       total += t;
     }
 
-    // finalize batch totals and save (normalize save result)
+    // finalize and save batch (normalize again)
     savedBatch.total_amount = total;
-    const finalBatchRes = await batchRepo.save(savedBatch);
-    const finalBatch = Array.isArray(finalBatchRes) ? finalBatchRes[0] : finalBatchRes;
+    const finalBatchRaw = await batchRepo.save(savedBatch);
+    const finalBatch: PayoutBatch = Array.isArray(finalBatchRaw) ? (finalBatchRaw as any)[0] : (finalBatchRaw as any);
 
     return finalBatch;
   });
 }
+
 
 
 // Copy-paste into your PaymentsService class
@@ -765,79 +1067,151 @@ async createAggregatedBatch(opts: {
 //  - this.kafka : KafkaProvider to emit events
 
 // async processAggregatedBatch(batchId: string) {
-//   const batch = await this.payoutBatchRepo.findOne({ where: { id: batchId } });
-//   if (!batch) throw new Error('batch not found');
-//   if (batch.status !== 'created' && batch.status !== 'failed') return batch;
+//   const logger = this.logger;
+
+//   // 1) mark batch as processing (optimistic lock style)
+//   const batchRepo = this.dataSource.getRepository(PayoutBatch);
+//   const aggRepo = this.dataSource.getRepository(AggregatedPayout);
+//   const childRepo = this.dataSource.getRepository(PayoutChild);
+
+//   const batch = await batchRepo.findOne({ where: { id: batchId } });
+//   if (!batch) throw new Error('Batch not found');
+//   if (batch.status === 'processing') throw new Error('Batch already processing');
 
 //   batch.status = 'processing';
-//   await this.payoutBatchRepo.save(batch);
+//   batch.attempt_count = (batch.attempt_count ?? 0) + 1;
+//   await batchRepo.save(batch);
 
-//   // find aggregated items in the batch
-//   const aggregatedItems = await this.payoutItemRepo.find({ where: { payout_batch_id: batchId, reason: 'promo_platform_topup_aggregated' } });
+//   // 2) load all aggregated payouts for this batch that are ready
+//   const aggs = await aggRepo.find({ where: { payout_batch_id: batchId, status: 'batched' } });
+//   if (!aggs || aggs.length === 0) {
+//     logger.warn(`No aggregated payouts to process for batch ${batchId}`);
+//     batch.status = 'completed';
+//     batch.processed_at = new Date();
+//     await batchRepo.save(batch);
+//     return batch;
+//   }
 
-//   for (const agg of aggregatedItems) {
-//     if (agg.status !== 'batched') continue;
+//   // mark aggs processing
+//   const aggIds = aggs.map((a) => a.id);
+//   await aggRepo
+//     .createQueryBuilder()
+//     .update()
+//     .set({ status: 'processing', attempt_count: () => 'attempt_count + 1' })
+//     .where('id = ANY(:ids)', { ids: aggIds })
+//     .execute();
 
-//     try {
-//       const reference = `payout-agg-${agg.id}`;
+//   // build transfers (one per aggregated payout)
+//   const transfers = aggs.map((a) => ({
+//     payout_item_id: a.id,
+//     account_number: a.account_number,
+//     account_name: a.account_name,
+//     bank_code: a.bank_code,
+//     amount: Number(a.amount),
+//     currency: 'ETB',
+//     metadata: { payout_item_id: a.id, child_ids: a.meta?.child_ids ?? [] },
+//   }));
 
-//       // validate bank details
-//       if (!agg.account_number || !agg.account_name || !agg.bank_code) {
-//         agg.status = 'failed';
-//         agg.last_error = 'missing_bank_details';
-//         await this.payoutItemRepo.save(agg);
-//         continue;
-//       }
+//   let providerResp: any;
+//   try {
+//     // assume chapa.bulkTransfer returns { provider_batch_id, results: [{ payout_item_id, status, transfer_id, error, fee }] }
+//     providerResp = await this.chapa.bulkTransfer({ transfers, reference: batchId });
+//   } catch (err) {
+//     logger.error('Chapa bulk transfer failed', err?.message ?? err);
 
-//       // perform transfer via Chapa (single transfer per restaurant aggregated item)
-//       // adapt to your Chapa client API; below assumes createTransfer returns { data: { id: '...' }, ... }
-//       const resp = await this.chapa.createTransfer({
-//         amount: agg.amount,
-//         currency: process.env.PAYOUT_CURRENCY ?? 'ETB',
-//         account_number: agg.account_number,
-//         account_name: agg.account_name,
-//         bank_code: agg.bank_code,
-//         reference,
-//         metadata: { batch_id: batchId, aggregated_item_id: agg.id },
-//       });
+//     // mark aggs failed
+//     await aggRepo
+//       .createQueryBuilder()
+//       .update()
+//       .set({ status: 'failed', last_error: String(err?.message ?? err) })
+//       .where('id = ANY(:ids)', { ids: aggIds })
+//       .execute();
 
-//       agg.provider_transfer_id = resp?.data?.id ?? resp?.id ?? null;
-//       agg.provider_response = resp;
-//       agg.status = 'paid';
-//       agg.attempt_count = (agg.attempt_count ?? 0) + 1;
-//       await this.payoutItemRepo.save(agg);
+//     batch.status = 'failed';
+//     batch.meta = { ...(batch.meta ?? {}), provider_error: err?.message ?? String(err) };
+//     batch.processed_at = new Date();
+//     await batchRepo.save(batch);
+//     return batch;
+//   }
 
-//       // mark child items as paid and attach provider info
-//       const childIds: string[] = agg.meta?.child_item_ids ?? [];
-//       if (childIds.length) {
-//         await this.payoutItemRepo.createQueryBuilder()
+//   // Save provider batch id and raw response
+//   batch.provider_batch_id = providerResp?.provider_batch_id ?? null;
+//   batch.meta = { ...(batch.meta ?? {}), provider_response: providerResp };
+
+//   // Map per-transfer results
+//   const results: any[] = providerResp?.results ?? [];
+//   const resultMap = new Map<string, any>();
+//   for (const r of results) resultMap.set(String(r.payout_item_id), r);
+
+//   // Update aggregated rows and their children accordingly
+//   for (const a of aggs) {
+//     const res = resultMap.get(a.id);
+//     if (!res) {
+//       // No immediate per-transfer result -> leave as processing for async webhook
+//       continue;
+//     }
+
+//     if (res.status === 'success' || res.status === 'paid') {
+//       await aggRepo.update({ id: a.id }, { status: 'paid', provider_transfer_id: res.transfer_id ?? null, provider_response: res });
+
+//       // mark children as paid and attach paid_via in meta
+//       const childIds = a.meta?.child_ids ?? [];
+//       if (childIds && childIds.length) {
+//         await childRepo
+//           .createQueryBuilder()
 //           .update()
-//           .set({ status: 'paid', provider_transfer_id: agg.provider_transfer_id, provider_response: agg.provider_response })
+//           .set({ status: 'paid', meta: () => `jsonb_set(coalesce(meta,'{}'::jsonb), '{paid_via}', to_jsonb('${res.transfer_id}'))` })
 //           .where('id = ANY(:ids)', { ids: childIds })
 //           .execute();
 //       }
-//     } catch (err) {
-//       agg.status = 'failed';
-//       agg.last_error = err?.message ?? String(err);
-//       agg.attempt_count = (agg.attempt_count ?? 0) + 1;
-//       await this.payoutItemRepo.save(agg);
+
+//       // emit kafka event per payout item
+//       try {
+//         await this.kafka.emit('payout.item.paid', { payout_item_id: a.id, restaurant_id: a.restaurant_id, amount: a.amount, provider_transfer_id: res.transfer_id });
+//       } catch (e) {
+//         logger.warn('Failed to emit payout.item.paid', e?.message ?? e);
+//       }
+//     } else {
+//       // failed
+//       await aggRepo.update({ id: a.id }, { status: 'failed', last_error: res.error ?? 'provider_failed', provider_response: res });
+
+//       const childIds = a.meta?.child_ids ?? [];
+//       if (childIds && childIds.length) {
+//         await childRepo
+//           .createQueryBuilder()
+//           .update()
+//           .set({ status: 'failed', meta: () => `jsonb_set(coalesce(meta,'{}'::jsonb), '{last_error}', to_jsonb('${String(res.error ?? 'provider_failed')}'))` })
+//           .where('id = ANY(:ids)', { ids: childIds })
+//           .execute();
+//       }
+
+//       try {
+//         await this.kafka.emit('payout.item.failed', { payout_item_id: a.id, restaurant_id: a.restaurant_id, amount: a.amount, error: res.error });
+//       } catch (e) {
+//         logger.warn('Failed to emit payout.item.failed', e?.message ?? e);
+//       }
 //     }
 //   }
 
-//   // recompute batch final state
-//   const allItems = await this.payoutItemRepo.find({ where: { payout_batch_id: batchId } });
-//   batch.status = allItems.every((i) => i.status === 'paid') ? 'completed' : 'failed';
-//   batch.total_amount = allItems.reduce((s, it) => s + Number(it.amount), 0);
-//   batch.processed_at = new Date();
-//   await this.payoutBatchRepo.save(batch);
+//   // compute final batch status
+//   const updatedAggs = await aggRepo.find({ where: { payout_batch_id: batchId } });
+//   const total = updatedAggs.reduce((s, it) => s + Number(it.amount ?? 0), 0);
+//   const allPaid = updatedAggs.every((it) => it.status === 'paid');
+//   const anyFailed = updatedAggs.some((it) => it.status === 'failed');
 
+//   batch.total_amount = total;
+//   batch.processed_at = new Date();
+//   batch.status = allPaid ? 'completed' : anyFailed ? 'failed' : 'processing';
+
+//   await batchRepo.save(batch);
+
+//   // emit batch event
 //   try {
-//     await this.kafka.emit('payout.batch.completed', { batchId: batch.id, status: batch.status, provider_batch_id: batch.provider_batch_id });
+//     await this.kafka.emit('payout.batch.processed', { batch_id: batch.id, provider_batch_id: batch.provider_batch_id, total_amount: batch.total_amount, status: batch.status });
 //   } catch (e) {
-//     this.logger.warn('Failed to emit payout.batch.completed', e?.message ?? e);
+//     logger.warn('Failed to emit payout.batch.processed', e?.message ?? e);
 //   }
 
 //   return batch;
 // }
-
 }

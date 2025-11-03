@@ -178,7 +178,7 @@ import { PromoCodeService } from './promo.service';
 import { CreatePromoDto } from './dtos/create-promo.dto';
 import { UpdatePromoDto } from './dtos/update-promo.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery, ApiBody } from '@nestjs/swagger';
 
 @ApiTags('Promos')
 @Controller('promos')
@@ -268,32 +268,82 @@ export class PromoCodesController {
     return promo;
   }
 
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth('access-token')
-  @Patch(':idOrCode')
-  @ApiOperation({ summary: 'Update a promo (platform admins or promo owner)' })
-  async update(@Req() req: any, @Param('idOrCode') idOrCode: string, @Body() dto: UpdatePromoDto) {
-    const user = this.getUserInfo(req);
+  // @UseGuards(JwtAuthGuard)
+  // @ApiBearerAuth('access-token')
+  // @Patch(':idOrCode')
+  // @ApiOperation({ summary: 'Update a promo (platform admins or promo owner)' })
+  // async update(@Req() req: any, @Param('idOrCode') idOrCode: string, @Body() dto: UpdatePromoDto) {
+  //   const user = this.getUserInfo(req);
 
-    let existing: any = null;
-    try {
-      existing = await this.promoSvc.findById(idOrCode);
-    } catch {
-      try {
-        existing = await this.promoSvc.findByCode(idOrCode);
-      } catch {
-        throw new NotFoundException('Promo not found');
+  //   let existing: any = null;
+  //   try {
+  //     existing = await this.promoSvc.findById(idOrCode);
+  //   } catch {
+  //     try {
+  //       existing = await this.promoSvc.findByCode(idOrCode);
+  //     } catch {
+  //       throw new NotFoundException('Promo not found');
+  //     }
+  //   }
+
+  //   if (existing.issuer_type === 'platform' && !user.roles.includes('platform_admin')) {
+  //     throw new ForbiddenException('Only platform admins can update platform promos');
+  //   }
+
+  //   if (!user.roles.includes('platform_admin') && existing.applicable_restaurant_id && user.restaurantId && existing.applicable_restaurant_id !== user.restaurantId) {
+  //     throw new ForbiddenException('Cannot update promos for other restaurants');
+  //   }
+
+  //   return this.promoSvc.update(idOrCode, dto as any);
+  // }
+
+
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth('access-token')
+@Patch(':idOrCode')
+@ApiOperation({ summary: 'Update a promo (platform admins or promo owner)' })
+@ApiBody({
+  type: UpdatePromoDto,
+  description: 'Fields to update (all optional)',
+  examples: {
+    default: {
+      summary: 'Update promo example',
+      value: {
+        code: 'SUMMER10',
+        discount_type: 'percentage',
+        discount_value: 15,
+        issuer_type: 'platform',
+        restaurant_share_percent: 50,
+        max_uses: 200,
+        expiry_date: '2025-12-31',
+        active: true
       }
     }
-
-    if (existing.issuer_type === 'platform' && !user.roles.includes('platform_admin')) {
-      throw new ForbiddenException('Only platform admins can update platform promos');
-    }
-
-    if (!user.roles.includes('platform_admin') && existing.applicable_restaurant_id && user.restaurantId && existing.applicable_restaurant_id !== user.restaurantId) {
-      throw new ForbiddenException('Cannot update promos for other restaurants');
-    }
-
-    return this.promoSvc.update(idOrCode, dto as any);
   }
+})
+async update(@Req() req: any, @Param('idOrCode') idOrCode: string, @Body() dto: UpdatePromoDto) {
+  const user = this.getUserInfo(req);
+
+  let existing: any = null;
+  try {
+    existing = await this.promoSvc.findById(idOrCode);
+  } catch {
+    try {
+      existing = await this.promoSvc.findByCode(idOrCode);
+    } catch {
+      throw new NotFoundException('Promo not found');
+    }
+  }
+
+  if (existing.issuer_type === 'platform' && !user.roles.includes('platform_admin')) {
+    throw new ForbiddenException('Only platform admins can update platform promos');
+  }
+
+  if (!user.roles.includes('platform_admin') && existing.applicable_restaurant_id && user.restaurantId && existing.applicable_restaurant_id !== user.restaurantId) {
+    throw new ForbiddenException('Cannot update promos for other restaurants');
+  }
+
+  return this.promoSvc.update(idOrCode, dto as any);
+}
+
 }
