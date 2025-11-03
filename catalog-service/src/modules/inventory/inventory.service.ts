@@ -10,6 +10,8 @@ import { Restaurant } from '../../entities/restaurant.entity';
 import { ReplenishItemDto } from './dto/replenish-item.dto';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { KafkaProvider } from 'src/providers/kafka.provider';
+import { InventoryParLevel } from '../../entities/inventory-par-level.entity';
+import { SetParLevelDto } from './dto/set-par-level.dto';
 
 // Order deduction payload
 interface OrderItemPayload {
@@ -29,10 +31,12 @@ export class InventoryService {
     @InjectRepository(Restaurant) private readonly restaurantRepository: Repository<Restaurant>,
     @InjectRepository(InventoryLog) private readonly inventoryLogRepository: Repository<InventoryLog>,
     private readonly kafkaClient: KafkaProvider,
+    @InjectRepository(InventoryParLevel)
+    private readonly parLevelRepository: Repository<InventoryParLevel>,
   ) {}
 
   // ---------- Cron: sync availability ----------
-  @Cron(CronExpression.EVERY_5_MINUTES)
+  @Cron(CronExpression.EVERY_10_MINUTES)
   async handleCron() {
     this.logger.log('Running scheduled job to sync inventory and menu availability...');
     await this.syncAvailability();
@@ -44,11 +48,10 @@ export class InventoryService {
 
     const lowStockItems = await this.inventoryRepository
       .createQueryBuilder('inventory')
-      .leftJoinAndSelect('inventory.menu_item', 'menuItem')
-      .leftJoinAndSelect('inventory.restaurant', 'restaurant') // <-- JOIN restaurant to get owner_id
+      // Use INNER JOIN to automatically filter out inventory for deleted menu items
+      .innerJoinAndSelect('inventory.menu_item', 'menuItem')
+      .innerJoinAndSelect('inventory.restaurant', 'restaurant')
       .where('inventory.stock_quantity <= inventory.reorder_level')
-      // Optional but recommended: Add a flag to avoid spamming notifications
-      // .andWhere('inventory.low_stock_notified = false') 
       .getMany();
 
     if (lowStockItems.length === 0) {
@@ -58,20 +61,18 @@ export class InventoryService {
 
     this.logger.log(`Found ${lowStockItems.length} low-stock items. Emitting events...`);
 
+    // This loop is now safe because every item is guaranteed to have a menu_item and restaurant
     for (const item of lowStockItems) {
       const payload = {
         menuItemId: item.menu_item_id,
-        itemName: item.menu_item.name, // We have the name from the join
+        itemName: item.menu_item.name,
         restaurantId: item.restaurant_id,
-        ownerId: item.restaurant.owner_id, // <-- CRITICAL: Add ownerId to payload
+        ownerId: item.restaurant.owner_id,
         remainingStock: item.stock_quantity,
         reorderLevel: item.reorder_level,
       };
 
       await this.kafkaClient.emit('inventory.low_stock', payload);
-
-      // Optional: Update the flag to prevent re-notifying
-      // await this.inventoryRepository.update(item.id, { low_stock_notified: true });
     }
   }
 
@@ -200,77 +201,61 @@ export class InventoryService {
   }
 
   // ---------- Manual stock update (owner-only; auto-create inventory if missing) ----------
-  async updateStockManually(menuItemId: string, newQuantity: number, userId: string): Promise<Inventory> {
+ async updateStockManually(menuItemId: string, quantityToAdd: number, userId: string): Promise<Inventory> {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
     try {
-      // try find existing inventory (may be missing)
+      // This logic to find/create the inventory item and validate ownership is correct and unchanged.
       let inventory = await queryRunner.manager.findOne(Inventory, { where: { menu_item_id: menuItemId } });
 
       if (!inventory) {
-        // Need to load menu item -> category -> restaurant to validate ownership and create inventory
-        const { menuItem, restaurantId, restaurantName } = await this.loadMenuItemWithRestaurant(queryRunner.manager, menuItemId);
-
-        if (!menuItem) {
-          throw new NotFoundException(`Menu item ${menuItemId} not found.`);
-        }
-        if (!restaurantId) {
-          throw new NotFoundException(`Menu item ${menuItemId} has no restaurant associated.`);
-        }
-        // ownership check
+        const { menuItem, restaurantId } = await this.loadMenuItemWithRestaurant(queryRunner.manager, menuItemId);
+        if (!menuItem) { throw new NotFoundException(`Menu item ${menuItemId} not found.`); }
+        if (!restaurantId) { throw new NotFoundException(`Menu item ${menuItemId} has no restaurant associated.`); }
         const restaurant = await this.restaurantRepository.findOne({ where: { id: restaurantId } });
         if (!restaurant) throw new NotFoundException(`Restaurant ${restaurantId} not found.`);
-        if (restaurant.owner_id !== userId) {
-          throw new ForbiddenException(`You do not belong to this restaurant (${restaurant.name}) while updating menu item ${menuItemId}.`);
-        }
-
-        // create inventory row
+        if (restaurant.owner_id !== userId) { throw new ForbiddenException(`You do not belong to this restaurant while updating menu item ${menuItemId}.`); }
         inventory = queryRunner.manager.create(Inventory, {
-          menu_item_id: menuItemId,
-          restaurant_id: restaurantId,
-          stock_quantity: 0,
+          menu_item_id: menuItemId, restaurant_id: restaurantId, stock_quantity: 0,
         });
         await queryRunner.manager.save(inventory);
         this.logger.log(`Created inventory row for menu_item_id ${menuItemId}`);
       } else {
-        // inventory exists — ensure the restaurant owning this inventory is owned by user
         const inventoryRestaurant = await queryRunner.manager.findOne(Restaurant, { where: { id: inventory.restaurant_id } });
         if (!inventoryRestaurant) throw new NotFoundException(`Restaurant ${inventory.restaurant_id} not found.`);
-        if (inventoryRestaurant.owner_id !== userId) {
-          throw new ForbiddenException(`You do not belong to this restaurant (${inventoryRestaurant.name}) while updating menu item ${menuItemId}.`);
-        }
+        if (inventoryRestaurant.owner_id !== userId) { throw new ForbiddenException(`You do not belong to this restaurant while updating menu item ${menuItemId}.`); }
       }
 
-      // apply update
+      // --- CORE LOGIC CHANGE ---
+      // The logic below is corrected to perform an ADD operation.
+
       const oldQuantity = inventory.stock_quantity;
-      const quantityChange = newQuantity - oldQuantity;
+      
+      // Add the incoming quantity to the current stock.
+      inventory.stock_quantity += quantityToAdd;
 
-      if (quantityChange !== 0) {
-        inventory.stock_quantity = newQuantity;
+      // The change is the positive number we just added.
+      const log = queryRunner.manager.create(InventoryLog, {
+        inventory,
+        quantity_change: quantityToAdd,
+        change_type: InventoryChangeType.MANUAL_UPDATE,
+        reason: 'Manual stock addition by owner.',
+      });
+      await queryRunner.manager.save(log);
 
-        const log = queryRunner.manager.create(InventoryLog, {
-          inventory,
-          quantity_change: quantityChange,
-          change_type: InventoryChangeType.MANUAL_UPDATE,
-          reason: 'Manual stock update by owner.',
-        });
-        await queryRunner.manager.save(log);
-
-        // update menu availability
-        if (oldQuantity <= 0 && newQuantity > 0) {
-          await queryRunner.manager.update(MenuItem, { id: menuItemId }, { is_available: true });
-        } else if (oldQuantity > 0 && newQuantity <= 0) {
-          await queryRunner.manager.update(MenuItem, { id: menuItemId }, { is_available: false });
-        }
-
-        await queryRunner.manager.save(inventory);
+      // Update menu availability if it was previously out of stock.
+      if (oldQuantity <= 0 && inventory.stock_quantity > 0) {
+        await queryRunner.manager.update(MenuItem, { id: menuItemId }, { is_available: true });
       }
 
+      await queryRunner.manager.save(inventory);
       await queryRunner.commitTransaction();
-      this.logger.log(`Successfully updated stock for menu item ${menuItemId} to ${newQuantity}`);
+      
+      this.logger.log(`Successfully added ${quantityToAdd} stock for menu item ${menuItemId}. New total: ${inventory.stock_quantity}`);
       return inventory;
+
     } catch (err) {
       await queryRunner.rollbackTransaction();
       this.logger.error(`Failed to update stock for menu item ${menuItemId}. Transaction rolled back.`, err.stack || err);
@@ -280,7 +265,6 @@ export class InventoryService {
     }
   }
 
-  // ---------- Replenish (bulk) ----------
   async replenishStock(items: ReplenishItemDto[], userId: string): Promise<{ message: string; count: number }> {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
@@ -288,73 +272,56 @@ export class InventoryService {
 
     try {
       for (const item of items) {
-        // find existing inventory
+        // This logic to find/create the inventory item and validate ownership is correct and unchanged.
         let inventory = await queryRunner.manager.findOne(Inventory, { where: { menu_item_id: item.menu_item_id } });
-
         if (!inventory) {
-          // load menu item -> category -> restaurant for ownership validation
-          const { menuItem, restaurantId, restaurantName } = await this.loadMenuItemWithRestaurant(queryRunner.manager, item.menu_item_id);
-
-          if (!menuItem) {
-            throw new NotFoundException(`Menu item ${item.menu_item_id} not found.`);
-          }
-          if (!restaurantId) {
-            throw new NotFoundException(`Menu item ${item.menu_item_id} has no restaurant associated.`);
-          }
-
+          const { menuItem, restaurantId } = await this.loadMenuItemWithRestaurant(queryRunner.manager, item.menu_item_id);
+          if (!menuItem) { throw new NotFoundException(`Menu item ${item.menu_item_id} not found.`); }
+          if (!restaurantId) { throw new NotFoundException(`Menu item ${item.menu_item_id} has no restaurant associated.`); }
           const restaurant = await this.restaurantRepository.findOne({ where: { id: restaurantId } });
-          if (!restaurant) {
-            throw new NotFoundException(`Restaurant ${restaurantId} not found.`);
-          }
-          if (restaurant.owner_id !== userId) {
-            throw new ForbiddenException(`You do not belong to this restaurant (${restaurant.name}) while replenishing menu item ${item.menu_item_id}.`);
-          }
-
-          // create inventory row
+          if (!restaurant) { throw new NotFoundException(`Restaurant ${restaurantId} not found.`); }
+          if (restaurant.owner_id !== userId) { throw new ForbiddenException(`You do not belong to this restaurant while replenishing menu item ${item.menu_item_id}.`); }
           inventory = queryRunner.manager.create(Inventory, {
-            menu_item_id: item.menu_item_id,
-            restaurant_id: restaurantId,
-            stock_quantity: 0,
+            menu_item_id: item.menu_item_id, restaurant_id: restaurantId, stock_quantity: 0,
           });
           await queryRunner.manager.save(inventory);
           this.logger.log(`Created inventory row for menu_item_id ${item.menu_item_id}`);
         } else {
-          // inventory exists — verify owner of the restaurant attached to inventory
           const inventoryRestaurant = await queryRunner.manager.findOne(Restaurant, { where: { id: inventory.restaurant_id } });
           if (!inventoryRestaurant) throw new NotFoundException(`Restaurant ${inventory.restaurant_id} not found.`);
-          if (inventoryRestaurant.owner_id !== userId) {
-            throw new ForbiddenException(`You do not belong to this restaurant (${inventoryRestaurant.name}) while replenishing menu item ${item.menu_item_id}.`);
-          }
+          if (inventoryRestaurant.owner_id !== userId) { throw new ForbiddenException(`You do not belong to this restaurant while replenishing menu item ${item.menu_item_id}.`); }
         }
 
-        // apply the update
+        // --- CORE LOGIC CHANGE ---
+        // The logic below is corrected to perform an ADD operation.
+
         const oldQuantity = inventory.stock_quantity;
-        const newQuantity = item.stock_quantity;
-        const quantityChange = newQuantity - oldQuantity;
 
-        if (quantityChange !== 0) {
-          inventory.stock_quantity = newQuantity;
+        // Add the quantity from the DTO to the current stock.
+        // We use item.stock_quantity because that's the property name in your DTO.
+        inventory.stock_quantity += item.stock_quantity;
 
-          const log = queryRunner.manager.create(InventoryLog, {
-            inventory,
-            quantity_change: quantityChange,
-            change_type: InventoryChangeType.RESTOCK,
-            reason: 'Bulk replenish operation.',
-          });
-          await queryRunner.manager.save(log);
+        const log = queryRunner.manager.create(InventoryLog, {
+          inventory,
+          quantity_change: item.stock_quantity,
+          change_type: InventoryChangeType.RESTOCK,
+          reason: 'Bulk replenish operation.',
+        });
+        await queryRunner.manager.save(log);
 
-          if (oldQuantity <= 0 && newQuantity > 0) {
-            await queryRunner.manager.update(MenuItem, { id: item.menu_item_id }, { is_available: true });
-          }
-
-          await queryRunner.manager.save(inventory);
+        // Update menu availability if it was previously out of stock.
+        if (oldQuantity <= 0 && inventory.stock_quantity > 0) {
+          await queryRunner.manager.update(MenuItem, { id: item.menu_item_id }, { is_available: true });
         }
+
+        await queryRunner.manager.save(inventory);
       }
 
       await queryRunner.commitTransaction();
-      const successMsg = `Successfully replenished stock for ${items.length} item(s).`;
+      const successMsg = `Successfully added stock for ${items.length} item(s).`;
       this.logger.log(successMsg);
       return { message: successMsg, count: items.length };
+      
     } catch (err) {
       await queryRunner.rollbackTransaction();
       this.logger.error(`Failed to replenish stock. Transaction rolled back.`, err.stack || err);
@@ -363,6 +330,179 @@ export class InventoryService {
       await queryRunner.release();
     }
   }
-  
+
+  @Cron(CronExpression.EVERY_DAY_AT_3AM) // Runs automatically every day at 3 AM
+  async handleDailyStockReset() {
+    this.logger.log('Running daily job to reset stock to configured par levels...');
+    const parLevels = await this.parLevelRepository.find();
+
+    if (parLevels.length === 0) {
+      this.logger.log('No par levels configured. Skipping daily reset.');
+      return;
+    }
+    
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+        for (const par of parLevels) {
+            let inventory = await queryRunner.manager.findOne(Inventory, { where: { menu_item_id: par.menu_item_id } });
+
+            if (!inventory) {
+                inventory = queryRunner.manager.create(Inventory, {
+                    menu_item_id: par.menu_item_id,
+                    restaurant_id: par.restaurant_id,
+                    stock_quantity: 0, 
+                });
+            }
+            
+            const oldQuantity = inventory.stock_quantity;
+            const newQuantity = par.par_level; // This is the target quantity
+            const quantityChange = newQuantity - oldQuantity;
+
+            // This logic performs a RESET, not an addition.
+            if (quantityChange !== 0) {
+                inventory.stock_quantity = newQuantity;
+
+                const log = queryRunner.manager.create(InventoryLog, {
+                    inventory,
+                    quantity_change: quantityChange,
+                    change_type: InventoryChangeType.MANUAL_UPDATE, // Can be logged as MANUAL or a new type
+                    reason: `Daily auto-reset to par level of ${newQuantity}.`,
+                });
+                await queryRunner.manager.save(log);
+
+                if (oldQuantity <= 0 && newQuantity > 0) {
+                    await queryRunner.manager.update(MenuItem, { id: par.menu_item_id }, { is_available: true });
+                } else if (oldQuantity > 0 && newQuantity <= 0) {
+                    await queryRunner.manager.update(MenuItem, { id: par.menu_item_id }, { is_available: false });
+                }
+                
+                await queryRunner.manager.save(inventory);
+            }
+        }
+        await queryRunner.commitTransaction();
+        this.logger.log(`Successfully reset stock for ${parLevels.length} item(s) to their par levels.`);
+    } catch (err) {
+        await queryRunner.rollbackTransaction();
+        this.logger.error('Failed during daily stock reset. Transaction rolled back.', err.stack || err);
+    } finally {
+        await queryRunner.release();
+    }
+  }
+async setParLevel(dto: SetParLevelDto, userId: string): Promise<InventoryParLevel> {
+    const { menuItem, restaurantId } = await this.loadMenuItemWithRestaurant(this.dataSource.manager, dto.menu_item_id);
+    if (!menuItem) { throw new NotFoundException(`Menu item ${dto.menu_item_id} not found.`); }
+    if (!restaurantId) { throw new NotFoundException(`Menu item ${dto.menu_item_id} has no restaurant associated.`); }
+    
+    await this.validateOwnerAccess(restaurantId, userId);
+
+    let parLevel = await this.parLevelRepository.findOne({ where: { menu_item_id: dto.menu_item_id } });
+    
+    if (parLevel) {
+      // Update existing par level
+      parLevel.par_level = dto.par_level;
+    } else {
+      // Create a new par level
+      parLevel = this.parLevelRepository.create({
+        menu_item_id: dto.menu_item_id,
+        restaurant_id: restaurantId,
+        par_level: dto.par_level,
+      });
+    }
+    return this.parLevelRepository.save(parLevel);
+  }
+
+  async getParLevelsForRestaurant(restaurantId: string, userId: string): Promise<InventoryParLevel[]> {
+    await this.validateOwnerAccess(restaurantId, userId);
+    
+    return this.parLevelRepository.find({
+      where: { restaurant_id: restaurantId },
+      relations: ['menu_item'],
+      order: { menu_item: { name: 'ASC' } }
+    });
+  }
+
+  async removeParLevel(menuItemId: string, userId: string): Promise<{ message: string }> {
+    const parLevel = await this.parLevelRepository.findOne({ where: { menu_item_id: menuItemId } });
+    if (!parLevel) { throw new NotFoundException(`Par level for menu item ${menuItemId} not found.`); }
+    
+    await this.validateOwnerAccess(parLevel.restaurant_id, userId);
+
+    await this.parLevelRepository.remove(parLevel);
+    return { message: 'Daily stock reset level removed successfully.' };
+  }
+
+  // --- NEW PRIVATE HELPER FOR OWNERSHIP VALIDATION ---
+  private async validateOwnerAccess(restaurantId: string | undefined, userId: string): Promise<void> {
+    if (!restaurantId) {
+      throw new NotFoundException(`Restaurant id not provided.`);
+    }
+    const restaurant = await this.restaurantRepository.findOne({ where: { id: restaurantId } });
+    if (!restaurant) {
+      throw new NotFoundException(`Restaurant with id ${restaurantId} not found.`);
+    }
+    if (restaurant.owner_id !== userId) {
+      throw new ForbiddenException(`You do not belong to this restaurant.`);
+    }
+  }
+
+   async bulkSetParLevels(
+    items: SetParLevelDto[],
+    userId: string,
+  ): Promise<{ message: string; count: number }> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      for (const item of items) {
+        // Step 1: Validate ownership for each item
+        const { menuItem, restaurantId } = await this.loadMenuItemWithRestaurant(
+          queryRunner.manager,
+          item.menu_item_id,
+        );
+        if (!menuItem) {
+          throw new NotFoundException(`Menu item ${item.menu_item_id} not found.`);
+        }
+        await this.validateOwnerAccess(restaurantId, userId);
+
+        // Step 2: Find existing or create new par level record
+        let parLevel = await queryRunner.manager.findOne(InventoryParLevel, {
+          where: { menu_item_id: item.menu_item_id },
+        });
+
+        if (parLevel) {
+          // Update existing
+          parLevel.par_level = item.par_level;
+        } else {
+          // Create new
+          parLevel = queryRunner.manager.create(InventoryParLevel, {
+            menu_item_id: item.menu_item_id,
+            restaurant_id: restaurantId,
+            par_level: item.par_level,
+          });
+        }
+
+        // Step 3: Save the record within the transaction
+        await queryRunner.manager.save(parLevel);
+      }
+
+      await queryRunner.commitTransaction();
+
+      const successMsg = `Successfully set par levels for ${items.length} item(s).`;
+      this.logger.log(successMsg);
+      return { message: successMsg, count: items.length };
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      this.logger.error('Failed to set par levels in bulk. Transaction rolled back.', err.stack || err);
+      throw err; // Re-throw the error to be handled by NestJS
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+
 }
 

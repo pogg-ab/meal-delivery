@@ -15,7 +15,11 @@ import {
   FileTypeValidator,
   Get,
   ClassSerializerInterceptor,
+  Res,
+  StreamableFile,
+  Query,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { RestaurantsService } from './restaurants.service';
 import { RegisterRestaurantDto } from './dto/register-restaurant.dto';
@@ -28,6 +32,8 @@ import { Roles } from 'src/common/decorators/roles.decorator';
 import { UpdateRestaurantDto } from './dto/update-restaurant.dto';
 import { RestaurantProfileDto } from './dto/restaurant-profile.dto';
 import { Restaurant } from 'src/entities/restaurant.entity';
+import { createReadStream } from 'fs';
+import { join } from 'path';
 
 @ApiTags('Restaurants')
 @Controller('restaurants')
@@ -115,14 +121,47 @@ updateProfile(
   return this.restaurantsService.updateProfile(ownerId, restaurantId, updateRestaurantDto);
 }
 
-@Get('pending-review')
-@Roles('platform_admin')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@ApiBearerAuth('access-token')
-@ApiOperation({ summary: 'Get all restaurants awaiting admin approval (Admin only)' })
-getPendingRestaurants() {
-  return this.restaurantsService.findPendingReview();
-}
+ // --- UPDATE: Replaced 'pending-review' with a more flexible endpoint ---
+  @Get('for-review')
+  @Roles('platform_admin')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Get restaurants by status for admin review (e.g., ?status=APPROVED,UNDER_REVIEW)' })
+  getRestaurantsForReview(@Query('status') status?: string) {
+    // Default to 'UNDER_REVIEW' if no status is provided
+    const statuses = status
+      ? status.split(',').map(s => s.trim().toUpperCase())
+      : ['UNDER_REVIEW'];
+    return this.restaurantsService.findForReviewByStatus(statuses);
+  }
+
+  // --- ADD: This is the new endpoint for serving documents securely ---
+  @Get(':id/documents/:documentType')
+  @Roles('platform_admin')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Get a restaurant verification document (Admin only)' })
+  async getRestaurantDocument(
+    @Param('id') restaurantId: string,
+    @Param('documentType') documentType: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const fileDetails = await this.restaurantsService.getRestaurantDocument(
+      restaurantId,
+      documentType,
+    );
+
+    const fileStream = createReadStream(
+      join(process.cwd(), fileDetails.filePath),
+    );
+
+    res.set({
+      'Content-Type': fileDetails.mimetype,
+      'Content-Disposition': `inline; filename="${fileDetails.originalName}"`, // 'inline' tries to display in browser
+    });
+
+    return new StreamableFile(fileStream);
+  }
 
 @Get(':id/status')
 @UseGuards(JwtAuthGuard)

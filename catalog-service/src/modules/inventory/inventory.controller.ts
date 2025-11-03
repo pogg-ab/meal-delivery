@@ -2,6 +2,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -18,6 +19,8 @@ import { ApiTags, ApiBearerAuth, ApiOperation, ApiOkResponse, ApiBody, ApiParam,
 import { ReplenishResponseDto } from './dto/replenish-response.dto';
 import { InventoryDto } from './dto/inventory-response.dto';
 import { UserId } from '../../common/decorator/user-id.decorator';
+import { SetParLevelDto } from './dto/set-par-level.dto';
+import { BulkSetParLevelDto } from './dto/bulk-set-par-level.dto';
 
 @ApiTags('inventory')
 @ApiBearerAuth()
@@ -44,7 +47,8 @@ export class InventoryController {
 
   @Put(':menuItemId')
   @ApiBearerAuth('access-token')
-  @ApiOperation({ summary: 'Manually update stock quantity for a menu item (owner only)' })
+  // --- UPDATE: Description is now more accurate ---
+  @ApiOperation({ summary: 'Manually add stock to a menu item (owner only)' })
   @ApiParam({ name: 'menuItemId', description: 'Menu item UUID', format: 'uuid' })
   @ApiBody({ type: UpdateInventoryDto })
   @ApiOkResponse({ description: 'Updated inventory item', type: InventoryDto })
@@ -58,14 +62,17 @@ export class InventoryController {
   ): Promise<Inventory> {
     return this.inventoryService.updateStockManually(
       menuItemId,
+      // --- THIS IS THE FIX ---
+      // We use 'stock_quantity' as defined in your DTO.
       updateInventoryDto.stock_quantity,
       userId,
     );
   }
 
-  @Post('replenish')
+   @Post('replenish')
   @ApiBearerAuth('access-token')
-  @ApiOperation({ summary: 'Replenish inventory in bulk (owner only)' })
+  // --- UPDATE: Description is now more accurate ---
+  @ApiOperation({ summary: 'Add stock to inventory in bulk (owner only)' })
   @ApiBody({ type: ReplenishInventoryDto })
   @ApiOkResponse({ description: 'Replenish result', type: ReplenishResponseDto })
   @ApiUnauthorizedResponse({ description: 'Unauthorized. Missing or invalid JWT token.' })
@@ -77,11 +84,41 @@ export class InventoryController {
   ) {
     return this.inventoryService.replenishStock(replenishInventoryDto.items, userId);
   }
-  @Post('test/trigger-low-stock-check')
-@ApiExcludeEndpoint() // Hide from public docs
-async triggerLowStockCheck() {
-    // We are just manually calling the cron job's method
-    this.inventoryService.handleLowStockCheck(); 
-    return { message: "Low-stock check has been triggered successfully." };
-}
+
+   @Post('par-levels') 
+   @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Set or update daily reset levels for multiple menu items (owner only)' })
+  @ApiBody({ type: BulkSetParLevelDto })
+  @ApiOkResponse({ description: 'The par levels were set successfully.' })
+  async setParLevels(
+    @Body() bulkSetParLevelDto: BulkSetParLevelDto,
+    @UserId() userId: string,
+  ) {
+    return this.inventoryService.bulkSetParLevels(bulkSetParLevelDto.items, userId);
+  }
+
+  @Get('par-level/restaurant/:restaurantId')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Get all configured daily reset levels for a restaurant (owner only)' })
+  @ApiParam({ name: 'restaurantId', description: 'Restaurant UUID', format: 'uuid' })
+  @ApiOkResponse({ description: 'A list of configured par levels.' })
+  async getParLevelsForRestaurant(
+    @Param('restaurantId', ParseUUIDPipe) restaurantId: string,
+    @UserId() userId: string,
+  ) {
+    return this.inventoryService.getParLevelsForRestaurant(restaurantId, userId);
+  }
+
+  @Delete('par-level/:menuItemId')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Remove a daily reset level for a menu item (owner only)' })
+  @ApiParam({ name: 'menuItemId', description: 'Menu item UUID', format: 'uuid' })
+  @ApiOkResponse({ description: 'The par level was removed successfully.' })
+  async removeParLevel(
+    @Param('menuItemId', ParseUUIDPipe) menuItemId: string,
+    @UserId() userId: string,
+  ) {
+    return this.inventoryService.removeParLevel(menuItemId, userId);
+  }
+
 }
