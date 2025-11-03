@@ -13,10 +13,12 @@ import { OrderGateway } from '../../gateways/order.gateway';
 import { KafkaProvider } from '../../providers/kafka.provider';
 import { OrderPickup } from 'src/entities/order-pickup.entity';
 import { OrdersPickupService } from './order-pickup.service';
+import { PromoCode } from 'src/entities/promo-code.entity';
+import { PromoCodeService } from '../promos/promo.service';
 
 @Module({
-imports: [TypeOrmModule.forFeature([Order, OrderItem, OrderPickup, OrderEvent, MenuItem, Inventory, InventoryLog,Restaurant])],
-providers: [OrdersService, OrdersPickupService, OrderGateway, KafkaProvider ],
+imports: [TypeOrmModule.forFeature([Order, OrderItem, OrderPickup, OrderEvent, MenuItem, Inventory, InventoryLog, Restaurant, PromoCode])],
+providers: [OrdersService, OrdersPickupService, OrderGateway, KafkaProvider, PromoCodeService],
 controllers: [OrdersController],
 exports: [OrdersService],
 })

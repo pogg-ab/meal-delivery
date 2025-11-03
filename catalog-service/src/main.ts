@@ -81,7 +81,6 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { MicroserviceOptions } from '@nestjs/microservices';
-// Make sure this path is correct for the catalog-service
 import { kafkaConfig } from './kafka.config';
 
 // Polyfill global crypto if needed

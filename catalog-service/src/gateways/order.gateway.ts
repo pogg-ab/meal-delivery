@@ -220,8 +220,6 @@
 // }
 
 
-
-
 // src/gateways/order.gateway.ts
 import {
   SubscribeMessage,
@@ -319,7 +317,7 @@ export class OrderGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
     }
   }
 
-  emitOrderUpdated(order: OrderSummary) {
+  emitOrderUpdated(order: any) {
     if (!this.server) return;
     try {
       this.server.to(`restaurant:${order.restaurant_id}`).emit('order.updated', order);
@@ -348,7 +346,7 @@ export class OrderGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
    *
    * pickup: { pickup_token?, pickup_code?, expires_at? }
    */
-  emitPickupCreated(order: OrderSummary, pickup: PickupSummary) {
+  emitPickupCreated(order: any, pickup: PickupSummary) {
     if (!this.server) return;
     try {
       // --- Full payload for the order (customer) ---

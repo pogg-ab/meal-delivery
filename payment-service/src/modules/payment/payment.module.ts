@@ -9,12 +9,14 @@ import { RestaurantSubaccount } from '../../entities/restaurant-subaccount.entit
 import { PlatformAccount } from 'src/entities/platform-account.entity';
 import { KafkaProvider } from '../../providers/kafka.provider';
 import { JwtStrategy } from 'src/common/strategies/jwt.strategy';
+import { PayoutBatch } from 'src/entities/payout-batch.entity';
+import { PayoutItem } from 'src/entities/payout-item.entity';
 import { HttpModule } from '@nestjs/axios';
 
 
 @Module({
 imports: [
-    TypeOrmModule.forFeature([Payment, RestaurantSubaccount, PlatformAccount ]),
+    TypeOrmModule.forFeature([Payment, RestaurantSubaccount, PlatformAccount, PayoutItem,  PayoutBatch]),
     
 ],
 controllers: [PaymentsController],
