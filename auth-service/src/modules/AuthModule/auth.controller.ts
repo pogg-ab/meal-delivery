@@ -1,7 +1,7 @@
 
-import { Controller, Post, Body, Req, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, Req, UseGuards, HttpStatus, HttpCode, Delete, Param } from '@nestjs/common';
 import { Request } from 'express';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiBody, ApiParam } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dtos/register.dto';
 import { LoginDto } from './dtos/login.dto';
@@ -15,6 +15,8 @@ import { ApiOkResponse } from '@nestjs/swagger';
 import { ResendOtpDto } from './dtos/resend-otp.dto';
 import { ForgotPasswordDto } from './dtos/forgot-password.dto';
 import { ResetPasswordDto } from './dtos/reset-password.dto';
+import { DeleteUserParamsDto } from './dtos/delete-user.dto';
+import { DeleteAllCustomersDto } from './dtos/delete-all-user.dto';
 
 @ApiTags('Auth') // Groups under "Auth"
 @Controller('auth')
@@ -97,5 +99,40 @@ async login(@Body() dto: LoginDto, @Req() req: Request): Promise<LoginResponseDt
   @ApiBody({ type: ResetPasswordDto })
   async resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto);
+  }
+
+//Endpoints for testing ----  TESTING
+  /**
+   * DELETE /users/:id
+   * Deletes a single user only if they have the "customer" role.
+   */
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Delete a customer by id' })
+  @ApiParam({ name: 'id', description: 'User UUID to delete' })
+  @ApiResponse({ status: 200, description: 'User deleted', schema: { example: { user_id: 'uuid', message: 'user_deleted' } } })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  @ApiResponse({ status: 403, description: 'User is not a customer' })
+  async deleteUser(@Param() params: DeleteUserParamsDto) {
+    return await this.authService.deleteUserIfCustomer(params.id);
+  }
+
+
+  /**
+   * DELETE /users/customers
+   * Deletes ALL users that have the "customer" role.
+   * Body: { confirm: true } — required to perform deletion (safety in Swagger).
+   */
+  @Delete('customers')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Delete all users with the customer role' })
+  @ApiBody({ type: DeleteAllCustomersDto, required: true })
+  @ApiResponse({ status: 200, description: 'Customers deleted', schema: { example: { deleted: 42, message: 'customers_deleted' } } })
+  @ApiResponse({ status: 400, description: 'Bad request (confirm missing or false)' })
+  async deleteAllCustomers(@Body() body: DeleteAllCustomersDto) {
+    if (!body.confirm) {
+      return { deleted: 0, message: 'confirm_required' };
+    }
+    return await this.authService.deleteAllCustomers();
   }
 }

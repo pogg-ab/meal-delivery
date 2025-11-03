@@ -78,10 +78,21 @@ items: OrderItem[];
 @OneToMany(() => OrderEvent, (ev) => ev.order, { cascade: true })
 events: OrderEvent[];
 
+// add transformers/imports as needed
+@Column({ type: 'decimal', precision: 12, scale: 2, nullable: true, transformer: { to: (v:number) => v, from: (v: string) => parseFloat(v) } })
+gross_amount?: number;
+
+@Column({ type: 'decimal', precision: 12, scale: 2, nullable: true, transformer: { to: (v:number) => v, from: (v: string) => parseFloat(v) } })
+discount_amount?: number;
+
+@Column({ type: 'jsonb', nullable: true })
+discount_breakdown?: any; // { discount_amount, restaurant_discount, platform_discount, platform_topup_needed, promo }
+
+@Column({ type: 'varchar', length: 64, nullable: true })
+promo_code?: string|null;
 
 @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
 created_at: Date;
-
 
 @UpdateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
 updated_at: Date;

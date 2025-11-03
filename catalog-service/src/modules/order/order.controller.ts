@@ -101,7 +101,8 @@ export class OrdersController {
     const username = req.user?.username;
     const phone = req.user?.phone;
     console.log(username);
-    const order = await this.ordersService.createOrder(userId, username, phone, dto);
+    // const order = await this.ordersService.createOrder(userId, username, phone, dto);
+    const order = await this.ordersService.createOrder(userId, username, phone, dto, dto.promo_code);
     return this.mapOrderToDto(order);
   }
 
@@ -273,6 +274,7 @@ export class OrdersController {
       }
     }
   })
+
   async getPaymentForOrder(
     @Req() req: any,
     @Param('id', new ParseUUIDPipe()) orderId: string,

@@ -5,6 +5,8 @@ import {
   BadRequestException,
   Logger,
   NotFoundException,
+  InternalServerErrorException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Any, Repository } from 'typeorm';
@@ -56,28 +58,48 @@ export class AuthService {
   ) {}
 
   async register(dto: RegisterDto) {
-    // 1) quick uniqueness check
-    const existing = await this.userRepo.findOne({
-      where: [{ email: dto.email }, { username: dto.username }],
-    });
-    if (existing) {
-      throw new BadRequestException('Email or username already in use');
+  // basic validation
+  if (!dto.email || !dto.password) {
+    throw new BadRequestException('Email and password are required.');
+  }
+
+  // quick uniqueness check (email, username, phone)
+  const existing = await this.userRepo.findOne({
+    where: [
+      { email: dto.email },
+      { username: dto.username },
+      { phone: dto.phone },
+    ],
+  });
+
+  if (existing) {
+    if (existing.email === dto.email) {
+      throw new BadRequestException('Email is already in use. Please use a different email.');
     }
+    if (dto.phone && existing.phone === dto.phone) {
+      throw new BadRequestException('Phone number is already in use. Please use a different phone number.');
+    }
+    throw new BadRequestException('Provided credentials are already in use.');
+  }
+
+  // hash password
+  const hash = await PasswordHashUtil.hash(dto.password);
+
+  // generate OTP
+  const otpPlain = OtpUtil.generateOtp();
+  const otpHash = crypto.createHash('sha256').update(otpPlain).digest('hex');
+  const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+  let savedUser: User;
   
-    // 2) hash password
-    const hash = await PasswordHashUtil.hash(dto.password);
-  
-    const otpPlain = OtpUtil.generateOtp();
-    const otpHash = crypto.createHash('sha256').update(otpPlain).digest('hex');
-    const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-  
-    const { savedUser } = await this.userRepo.manager.transaction(async (manager) => {
+  try {
+    const result = await this.userRepo.manager.transaction(async (manager) => {
       const uRepo = manager.getRepository(User);
       const rRepo = manager.getRepository(Role);
       const urRepo = manager.getRepository(UserRole);
       const oRepo = manager.getRepository(this.otpRepo.metadata.target as any); // or manager.getRepository(OtpEntity)
-  
-      // create user
+
+      // create & save user
       const user = uRepo.create({
         username: dto.username,
         email: dto.email,
@@ -86,8 +108,8 @@ export class AuthService {
         is_verified: false,
       });
       const saved = await uRepo.save(user);
-  
-      // ensure customer role exists (create if missing)
+
+      // ensure customer role exists
       let customerRole = await rRepo.findOne({ where: { name: 'customer' } });
       if (!customerRole) {
         customerRole = rRepo.create({
@@ -96,13 +118,14 @@ export class AuthService {
         } as Partial<Role>);
         customerRole = await rRepo.save(customerRole);
       }
-      // assign role (user_roles)
+
+      // assign role
       const userRole = urRepo.create({
         user_id: saved.user_id,
         role_id: customerRole.role_id,
       });
       await urRepo.save(userRole);
-  
+
       // create OTP record (hashed)
       const otpRecord = oRepo.create({
         user: saved,
@@ -112,27 +135,75 @@ export class AuthService {
         expires_at: otpExpiresAt,
       });
       await oRepo.save(otpRecord);
-      return { savedUser: saved };
-    }); 
 
-    try {
-      await this.mailer.sendOtpEmail(savedUser.email, otpPlain);
-    } catch (err) {
-      this.logger?.error('Failed to send OTP email', err as any);
+      return { savedUser: saved };
+    });
+
+    savedUser = result.savedUser;
+  } catch (err) {
+    const code = (err as any).code;
+    const detail = (err as any).detail || '';
+    const message = (err as any).message || '';
+
+    // Postgres unique violation
+    if (code === '23505') {
+      const colMatch = detail.match(/Key \((.*?)\)=/i);
+      const col = colMatch ? colMatch[1] : null;
+
+      if (col === 'phone') {
+        throw new BadRequestException('Phone number is already in use. Please use a different phone number.');
+      }
+      if (col === 'email') {
+        throw new BadRequestException('Email is already in use. Please use a different email.');
+      }
+
+      throw new BadRequestException('A record with the same unique value already exists.');
     }
-  
-    try {
-      await this.kafka.emit('identity.user.registered', {
-        user_id: savedUser.user_id,
-        email: savedUser.email,
-        created_at: savedUser.created_at,
-      });
-    } catch (err) {
-      this.logger?.warn('Failed to emit identity.user.registered event', err as any);
+
+    // MySQL duplicate entry
+    if (code === 'ER_DUP_ENTRY' || code === 1062 || /Duplicate entry/i.test(message)) {
+      const myMatch = message.match(/for key '?(.*?)'?(?:$|;)/i);
+      const key = myMatch ? myMatch[1] : '';
+      const keyLower = key.toLowerCase();
+
+      if (keyLower.includes('phone')) {
+        throw new BadRequestException('Phone number is already in use. Please use a different phone number.');
+      }
+      if (keyLower.includes('email')) {
+        throw new BadRequestException('Email is already in use. Please use a different email.');
+      }
+      if (keyLower.includes('username')) {
+        throw new BadRequestException('Username is already taken. Please choose another username.');
+      }
+
+      throw new BadRequestException('A record with the same unique value already exists.');
     }
-  
-    return { user_id: savedUser.user_id, message: 'verification_sent' };
+
+    // unknown error
+    this.logger.error('Failed to register user (unexpected error)', (err as any).stack || err);
+    throw new InternalServerErrorException('Failed to register user. Please try again later.');
   }
+
+  // non-fatal post-transaction work
+  try {
+    await this.mailer.sendOtpEmail(savedUser.email, otpPlain);
+  } catch (err) {
+    this.logger?.error('Failed to send OTP email', err as any);
+  }
+
+  try {
+    await this.kafka.emit('identity.user.registered', {
+      user_id: savedUser.user_id,
+      email: savedUser.email,
+      created_at: savedUser.created_at,
+    });
+  } catch (err) {
+    this.logger?.warn('Failed to emit identity.user.registered event', err as any);
+  }
+
+  return { user_id: savedUser.user_id, message: 'verification_sent' };
+}
+
 
   async verifyOtp(dto: VerifyOtpDto) {
     const user = await this.userRepo.findOne({ where: { email: dto.email } });
@@ -558,4 +629,59 @@ async resetPassword(dto: ResetPasswordDto) {
   return { ok: true, message: 'password_reset_success' };
  }
 
+
+ /**
+   * Delete a single user by id only if they have the "customer" role.
+   */
+  async deleteUserIfCustomer(userId: string): Promise<{ user_id: string; message: string }> {
+    const user = await this.userRepo.findOne({
+      where: { user_id: userId },
+      relations: ['roles', 'roles.role'],
+    });
+
+    if (!user) throw new NotFoundException('User not found');
+
+    const hasCustomerRole = Array.isArray(user.roles) && user.roles.some((ur) => ur.role && ur.role.name === 'customer');
+    if (!hasCustomerRole) throw new ForbiddenException('Only users with the customer role can be deleted');
+
+    try {
+      await this.userRepo.manager.transaction(async (manager) => {
+        await manager.getRepository(User).delete({ user_id: userId });
+      });
+
+      this.logger?.log(`Deleted user ${userId} (customer)`);
+      return { user_id: userId, message: 'user_deleted' };
+    } catch (err) {
+      this.logger?.error('Failed to delete user', (err as any).stack || err);
+      throw new InternalServerErrorException('Failed to delete user. Please try again later.');
+    }
+  }
+
+
+  /**
+   * Delete ALL users that have the "customer" role.
+   * Returns the number of deleted users.
+   */
+  async deleteAllCustomers(): Promise<{ deleted: number; message: string }> {
+    const customerRole = await this.roleRepo.findOne({ where: { name: 'customer' } });
+    if (!customerRole) return { deleted: 0, message: 'no_customer_role_found' };
+
+    const userRoles = await this.userRoleRepo.find({ where: { role_id: customerRole.role_id } });
+    const userIds = userRoles.map((ur) => ur.user_id).filter(Boolean);
+
+    if (userIds.length === 0) return { deleted: 0, message: 'no_customers_found' };
+
+    try {
+      const deleteResult = await this.userRepo.manager.transaction(async (manager) => {
+        return await manager.getRepository(User).delete(userIds);
+      });
+
+      const deleted = deleteResult.affected ?? 0;
+      this.logger?.log(`Deleted ${deleted} customer(s)`);
+      return { deleted, message: 'customers_deleted' };
+    } catch (err) {
+      this.logger?.error('Failed to delete customers', (err as any).stack || err);
+      throw new InternalServerErrorException('Failed to delete customers. Please try again later.');
+    }
+  }
 }

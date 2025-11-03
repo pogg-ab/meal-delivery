@@ -14,6 +14,7 @@ import { KafkaProvider } from 'src/providers/kafka.provider';
 import { CreateOrderDto } from './dtos/create-order.dto';
 import { OrdersPickupService } from './order-pickup.service'; 
 import { OrderPickup } from '../../entities/order-pickup.entity';
+import { PromoCodeService } from '../promos/promo.service';
 import { CancelOrderDto } from './dtos/cancel-order.dto';
 import { OwnerPreparingDto } from './dtos/owner-preparing.dto';
 
@@ -31,68 +32,197 @@ export class OrdersService {
     private readonly gateway: OrderGateway,
     private readonly kafka: KafkaProvider,
     private readonly pickupService: OrdersPickupService,
+    private readonly promoCodeService: PromoCodeService,
   ) {}
 
-  async createOrder(customerId: string, username: string, phone: string, dto: CreateOrderDto): Promise<Order> {
+  // async createOrder(customerId: string, username: string, phone: string, dto: CreateOrderDto): Promise<Order> {
+  //   if (!dto.items || dto.items.length === 0) {
+  //     throw new BadRequestException('Order must contain at least one item.');
+  //   }
+
+  //   return await this.dataSource.transaction(async (manager) => {
+  //     // Get repositories from the transaction manager
+  //     const orderRepo = manager.getRepository(Order);
+  //     const orderItemRepo = manager.getRepository(OrderItem);
+  //     const menuRepo = manager.getRepository(MenuItem);
+  //     const orderEventRepo = manager.getRepository(OrderEvent);
+  //     const restaurantRepo = manager.getRepository(Restaurant); // <-- Added
+
+  //     const restaurant = await restaurantRepo.findOne({ where: { id: dto.restaurant_id } });
+  //     if (!restaurant) {
+  //       throw new NotFoundException(`Restaurant with ID ${dto.restaurant_id} not found.`);
+  //     }
+  //     const ownerId = restaurant.owner_id;
+
+  //     let total = 0;
+  //     type PreparedItem = { 
+  //       menu_id: string; 
+  //       name: string; 
+  //       unit_price: number; 
+  //       qty: number; 
+  //       subtotal: number; 
+  //       instructions?: string 
+  //     };
+  //     const preparedItems: PreparedItem[] = [];
+
+  //     for (const it of dto.items) {
+  //       const menuItem = await menuRepo.findOne({ where: { id: it.menu_item_id } });
+  //       if (!menuItem) {
+  //         throw new NotFoundException(`Menu item not found: ${it.menu_item_id}`);
+  //       }
+  //       if (!menuItem.is_available) {
+  //         throw new BadRequestException(`Item not available: ${menuItem.name}`);
+  //       }
+
+  //       const quantity = Number(it.quantity ?? 1);
+  //       const subtotal = Number(menuItem.price) * quantity;
+  //       total += subtotal;
+
+  //       preparedItems.push({
+  //         menu_id: menuItem.id,
+  //         name: menuItem.name,
+  //         unit_price: Number(menuItem.price),
+  //         qty: quantity,
+  //         subtotal,
+  //         instructions: it.instructions,
+  //       });
+  //     }
+
+  //     // Create the main order record.
+  //     const orderData: DeepPartial<Order> = {
+  //       customer_id: customerId,
+  //       customer_name: username,
+  //       customer_phone: phone,
+  //       restaurant_id: dto.restaurant_id,
+  //       total_amount: total,
+  //       currency: dto.currency ?? 'USD',
+  //       instructions: dto.instructions,
+  //       is_delivery: !!dto.is_delivery,
+  //       status: OrderStatus.PENDING,
+  //       payment_status: PaymentStatus.NONE,
+  //     };
+  //     const orderEntity = orderRepo.create(orderData);
+  //     const savedOrder = await orderRepo.save(orderEntity);
+
+  //     // Create the associated order item records.
+  //     for (const p of preparedItems) {
+  //       const itemData: DeepPartial<OrderItem> = {
+  //         order_id: savedOrder.id,
+  //         menu_item_id: p.menu_id,
+  //         name: p.name,
+  //         unit_price: p.unit_price,
+  //         quantity: p.qty,
+  //         subtotal: p.subtotal,
+  //         instructions: p.instructions,
+  //       };
+  //       const itemEntity = orderItemRepo.create(itemData as any);
+  //       await orderItemRepo.save(itemEntity);
+  //     }
+
+  //     // Record the 'ORDER_CREATED' event for auditing.
+  //     await orderEventRepo.save(
+  //       orderEventRepo.create({
+  //         order_id: savedOrder.id,
+  //         actor_id: customerId,
+  //         action: 'ORDER_CREATED',
+  //         meta: { items: dto.items },
+  //       } as DeepPartial<OrderEvent>),
+  //     );
+
+  //     // Fetch the full order with its items to return.
+  //     const fullOrder = await orderRepo.findOne({ where: { id: savedOrder.id }, relations: ['items'] });
+  //     if (!fullOrder) {
+  //       throw new NotFoundException('Order not found after creation');
+  //     }
+
+  //     // Notify connected clients via WebSocket.
+  //     this.gateway.emitOrderCreated(fullOrder);
+
+  //     // Publish the enriched event to Kafka for other microservices.
+  //     try {
+  //       const eventPayload = {
+  //         ...fullOrder,
+  //         ownerId: ownerId, 
+  //       };
+  //       await this.kafka.emit('order.created', eventPayload);
+  //       this.logger.log(`Emitted order.created event for order ${fullOrder.id} to owner ${ownerId}`);
+  //     } catch (e) {
+  //       this.logger.warn('Kafka emit failed for order.created', e as any);
+  //     }
+
+  //     return fullOrder;
+  //   });
+  // }
+
+
+  async createOrder(
+    customerId: string,
+    username: string,
+    phone: string,
+    dto: CreateOrderDto,
+    promoCode?: string | null,
+  ): Promise<Order> {
     if (!dto.items || dto.items.length === 0) {
       throw new BadRequestException('Order must contain at least one item.');
     }
 
     return await this.dataSource.transaction(async (manager) => {
-      // Get repositories from the transaction manager
       const orderRepo = manager.getRepository(Order);
       const orderItemRepo = manager.getRepository(OrderItem);
       const menuRepo = manager.getRepository(MenuItem);
       const orderEventRepo = manager.getRepository(OrderEvent);
-      const restaurantRepo = manager.getRepository(Restaurant); // <-- Added
+      const restaurantRepo = manager.getRepository(Restaurant);
 
       const restaurant = await restaurantRepo.findOne({ where: { id: dto.restaurant_id } });
-      if (!restaurant) {
-        throw new NotFoundException(`Restaurant with ID ${dto.restaurant_id} not found.`);
-      }
+      if (!restaurant) throw new NotFoundException(`Restaurant with ID ${dto.restaurant_id} not found.`);
       const ownerId = restaurant.owner_id;
 
-      let total = 0;
-      type PreparedItem = { 
-        menu_id: string; 
-        name: string; 
-        unit_price: number; 
-        qty: number; 
-        subtotal: number; 
-        instructions?: string 
-      };
-      const preparedItems: PreparedItem[] = [];
-
+      // compute gross
+      let gross = 0;
+      const preparedItems = [] as any[];
       for (const it of dto.items) {
         const menuItem = await menuRepo.findOne({ where: { id: it.menu_item_id } });
-        if (!menuItem) {
-          throw new NotFoundException(`Menu item not found: ${it.menu_item_id}`);
-        }
-        if (!menuItem.is_available) {
-          throw new BadRequestException(`Item not available: ${menuItem.name}`);
-        }
+        if (!menuItem) throw new NotFoundException(`Menu item not found: ${it.menu_item_id}`);
+        if (!menuItem.is_available) throw new BadRequestException(`Item not available: ${menuItem.name}`);
 
-        const quantity = Number(it.quantity ?? 1);
-        const subtotal = Number(menuItem.price) * quantity;
-        total += subtotal;
-
+        const qty = Number(it.quantity ?? 1);
+        const subtotal = Number(menuItem.price) * qty;
+        gross += subtotal;
         preparedItems.push({
           menu_id: menuItem.id,
           name: menuItem.name,
           unit_price: Number(menuItem.price),
-          qty: quantity,
+          qty,
           subtotal,
           instructions: it.instructions,
         });
       }
 
-      // Create the main order record.
+      // Apply promo inside same transaction
+      const platformFeeRate = Number(process.env.PLATFORM_FEE_RATE ?? 0.05);
+      const promoResult = await this.promoCodeService.applyPromo(manager, promoCode, gross, dto.restaurant_id, platformFeeRate);
+
+      const customerPays = promoResult.customer_pays;
+      const discount_amount = promoResult.discount_amount;
+      const discount_breakdown = {
+        discount_amount,
+        restaurant_discount: promoResult.restaurant_discount,
+        platform_discount: promoResult.platform_discount,
+        platform_topup_needed: promoResult.platform_topup_needed,
+        promo: promoResult.promo,
+      };
+
+      // Create order
       const orderData: DeepPartial<Order> = {
         customer_id: customerId,
         customer_name: username,
         customer_phone: phone,
         restaurant_id: dto.restaurant_id,
-        total_amount: total,
+        total_amount: customerPays,
+        gross_amount: promoResult.gross,
+        discount_amount: discount_amount,
+        discount_breakdown,
+        promo_code: promoResult.promo?.code ?? null,
         currency: dto.currency ?? 'USD',
         instructions: dto.instructions,
         is_delivery: !!dto.is_delivery,
@@ -102,9 +232,9 @@ export class OrdersService {
       const orderEntity = orderRepo.create(orderData);
       const savedOrder = await orderRepo.save(orderEntity);
 
-      // Create the associated order item records.
+      // order items
       for (const p of preparedItems) {
-        const itemData: DeepPartial<OrderItem> = {
+        const itemEntity = orderItemRepo.create({
           order_id: savedOrder.id,
           menu_item_id: p.menu_id,
           name: p.name,
@@ -112,45 +242,75 @@ export class OrdersService {
           quantity: p.qty,
           subtotal: p.subtotal,
           instructions: p.instructions,
-        };
-        const itemEntity = orderItemRepo.create(itemData as any);
+        } as any);
         await orderItemRepo.save(itemEntity);
       }
 
-      // Record the 'ORDER_CREATED' event for auditing.
+      // order event
       await orderEventRepo.save(
         orderEventRepo.create({
           order_id: savedOrder.id,
           actor_id: customerId,
           action: 'ORDER_CREATED',
-          meta: { items: dto.items },
+          meta: {
+            items: dto.items,
+            promo: promoResult.promo ?? null,
+            discount: discount_breakdown,
+            gross: promoResult.gross,
+            customer_pays: promoResult.customer_pays,
+          },
         } as DeepPartial<OrderEvent>),
       );
 
-      // Fetch the full order with its items to return.
-      const fullOrder = await orderRepo.findOne({ where: { id: savedOrder.id }, relations: ['items'] });
-      if (!fullOrder) {
-        throw new NotFoundException('Order not found after creation');
-      }
+      const fullOrder = await orderRepo.findOne({ where: { id: savedOrder.id }, relations: ['items', 'restaurant'] });
+      if (!fullOrder) throw new NotFoundException('Order not found after creation');
 
-      // Notify connected clients via WebSocket.
-      this.gateway.emitOrderCreated(fullOrder);
+      // websocket notify
+      (this as any).gateway?.emitOrderCreated?.(fullOrder);
 
-      // Publish the enriched event to Kafka for other microservices.
+      // emit order.created for payment & other consumers
       try {
         const eventPayload = {
-          ...fullOrder,
-          ownerId: ownerId, 
+          order: {
+            id: fullOrder.id,
+            customer_id: fullOrder.customer_id,
+            restaurant_id: fullOrder.restaurant_id,
+            items: (fullOrder.items || []).map((i) => ({
+              id: i.id,
+              menu_item_id: i.menu_item_id,
+              name: i.name,
+              unit_price: Number(i.unit_price),
+              quantity: i.quantity,
+              subtotal: Number(i.subtotal),
+            })),
+            gross_amount: promoResult.gross,
+            amount: promoResult.customer_pays,
+            currency: fullOrder.currency,
+            promo: promoResult.promo ?? null,
+            discount: discount_breakdown,
+            platform_fee_amount: promoResult.platform_fee_amount,
+            desired_splits: promoResult.desired_splits,
+            platform_topup_needed: promoResult.platform_topup_needed,
+          },
+          ownerId: ownerId,
         };
         await this.kafka.emit('order.created', eventPayload);
         this.logger.log(`Emitted order.created event for order ${fullOrder.id} to owner ${ownerId}`);
       } catch (e) {
-        this.logger.warn('Kafka emit failed for order.created', e as any);
+        (this as any).logger?.warn?.('Kafka emit failed for order.created', e as any);
       }
 
       return fullOrder;
     });
   }
+
+
+
+// src/modules/orders/order.controller.ts (snippet) - pass promo_code
+// in create() handler: change call to ordersService.createOrder(...)
+// const order = await this.ordersService.createOrder(userId, username, phone, dto, dto.promo_code);
+
+  
 
   /**
    * Owner responds to an order. Emits 'order.awaiting_payment' when accepted.
@@ -205,6 +365,7 @@ async ownerResponse(ownerId: string, orderId: string, accepted: boolean, reason?
       currency: order.currency,
       customer_id: order.customer_id,
       restaurant_id: order.restaurant_id,
+      platform_topup_needed:order?.discount_breakdown?.platform_topup_needed,
     };
     try {
       await this.kafka.emit('order.awaiting_payment', paymentPayload);
@@ -283,7 +444,6 @@ async handlePaymentInitiated(payload: any) {
     this.logger.error('Failed to save order update for payment.initiated', e as any);
   }
 }
-
 
 // Optionally: emit websocket update via gateway (if injected) so customer/restaurant UI updates
 try {
