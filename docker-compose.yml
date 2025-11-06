@@ -42,6 +42,8 @@ services:
     restart: always
     networks:
       - erp-net
+    ports:
+    - "6379:6379"   
   # --- DATABASES ---
   catalog-db:
     image: postgres:15-alpine

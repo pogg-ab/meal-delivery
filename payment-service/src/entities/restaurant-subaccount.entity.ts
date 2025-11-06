@@ -13,6 +13,9 @@ restaurant_id: string;
 @Column({ type: 'varchar', length: 255 })
 chapa_subaccount_id: string;
 
+@Column({ type: 'varchar', length: 255, nullable: true })
+business_name?: string | null;
+
 // Bank details required for aggregated payouts
 @Column({ type: 'varchar', length: 255, nullable: true })
 account_name?: string | null;

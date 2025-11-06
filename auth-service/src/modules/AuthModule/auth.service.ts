@@ -509,7 +509,7 @@ async logout(userId: string, refreshPlain: string) {
 private async createAndSendOtp(user: User, purpose: 'registration' | 'password_reset', channel = 'email') {
   const otpPlain = OtpUtil.generateOtp();
   const otpHash = crypto.createHash('sha256').update(otpPlain).digest('hex');
-  const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+  const otpExpiresAt = new Date(Date.now() + 1 * 60 * 1000); // 10 minutes
 
   const otpRecord = this.otpRepo.create({
     user,

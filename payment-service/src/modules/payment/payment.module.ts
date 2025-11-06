@@ -4,6 +4,8 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
 import { PaymentsController } from './payment.controller';
 import { PaymentsService } from './payment.service';
 import { ChapaService } from './chapa.service';
+import { PayoutQueueService } from './payout-queue.service';
+import { PayoutQueueWorker } from './payout-queue.worker';
 import { Payment } from '../../entities/payment.entity';
 import { RestaurantSubaccount } from '../../entities/restaurant-subaccount.entity';
 import { PlatformAccount } from 'src/entities/platform-account.entity';
@@ -22,7 +24,7 @@ imports: [
     
 ],
 controllers: [PaymentsController],
-providers: [PaymentsService, JwtStrategy, ChapaService, KafkaProvider],
+providers: [PaymentsService, JwtStrategy, ChapaService, KafkaProvider, PayoutQueueService, PayoutQueueWorker ],
 exports: [PaymentsService],
 })
 export class PaymentsModule {}
