@@ -3,6 +3,7 @@ import { SearchService } from './search.service';
 import { ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsIn, IsNotEmpty, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { SearchRestaurantsDto } from './dto/search-restaurants.dto';
 
 // DTO for validating all incoming query parameters
 class SearchQueryDto {
@@ -58,5 +59,16 @@ export class SearchController {
       },
       results: searchData.results,
     };
+  }
+  @Get('location') // New endpoint at GET /search/location
+  @ApiTags('Search')
+  @ApiResponse({ status: 200, description: 'A list of restaurants near the specified location.' })
+  @ApiResponse({ status: 400, description: 'Bad Request. Invalid location parameters.' })
+  async searchByLocation(
+    @Query(new ValidationPipe({ transform: true, forbidNonWhitelisted: true })) 
+    queryDto: SearchRestaurantsDto,
+  ) {
+    // We will create this new service method next
+    return this.searchService.searchByLocation(queryDto);
   }
 }
