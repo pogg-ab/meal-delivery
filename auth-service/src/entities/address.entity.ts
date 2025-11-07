@@ -26,6 +26,24 @@ export class Address {
   @Column()
   region: string;
 
+  // --- ADD THESE COLUMNS ---
+  @Column({
+    type: 'decimal',
+    precision: 9,
+    scale: 6,
+    nullable: true, // Making it nullable for now to not break existing data
+  })
+  latitude: number;
+
+  @Column({
+    type: 'decimal',
+    precision: 9,
+    scale: 6,
+    nullable: true, // Making it nullable for now
+  })
+  longitude: number;
+  // -------------------------
+
   @Column({ default: 'Ethiopia' })
   country: string;
 
