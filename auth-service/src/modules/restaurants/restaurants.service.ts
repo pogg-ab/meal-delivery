@@ -91,7 +91,7 @@ export class RestaurantsService {
         return fullRestaurant;
     }
 
-   async addDocument(
+  async addDocument(
   ownerId: string,
   restaurantId: string,
   uploadDto: UploadDocumentDto,
@@ -135,10 +135,11 @@ async updateStatus(
   return this.entityManager.transaction(async (transactionalEntityManager) => {
     const restaurantRepo = transactionalEntityManager.getRepository(Restaurant);
     
-    // Find the restaurant AND its owner to get the owner's ID and the previous status
+    // --- MODIFIED ---
+    // We now also load the 'addresses' relation to include it in the Kafka event.
     const restaurant = await restaurantRepo.findOne({
       where: { id: restaurantId },
-      relations: ['owner'], 
+      relations: ['owner', 'addresses'], 
     });
 
     if (!restaurant) {
@@ -201,11 +202,27 @@ async updateStatus(
 
     // --- Your original Kafka & Mailer logic (side-effects) ---
     if (newStatus === RestaurantStatus.APPROVED) {
+        // --- MODIFIED ---
+        // Prepare the address payload for the Kafka event.
+        const primaryAddress = restaurant.addresses && restaurant.addresses.length > 0 
+            ? restaurant.addresses[0] 
+            : null;
+
+        // The Kafka event now includes the description and full address details.
         this.kafkaProvider.emit('restaurant.approved', {
             id: restaurant.id,
             name: restaurant.name,
+            description: restaurant.description,
             owner_id: restaurant.owner_id,
             is_active: restaurant.is_active,
+            address: primaryAddress ? {
+                street: primaryAddress.street,
+                city: primaryAddress.city,
+                region: primaryAddress.region,
+                country: primaryAddress.country,
+                latitude: primaryAddress.latitude,
+                longitude: primaryAddress.longitude,
+            } : null,
         });
 
         try {

@@ -1,3 +1,5 @@
+// in auth-service/src/modules/restaurants/dto/register-restaurant.dto.ts
+
 import { ApiProperty } from '@nestjs/swagger';
 import {
   IsString,
@@ -12,6 +14,8 @@ import {
   IsMilitaryTime,
   IsBoolean,
   IsOptional,
+  IsLatitude, // <-- ADD THIS
+  IsLongitude, // <-- ADD THIS
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -35,6 +39,18 @@ class AddressDto {
   @IsString()
   @IsNotEmpty()
   label: string;
+
+  // --- THIS IS THE FIX ---
+  // We are adding the latitude and longitude fields back into the DTO.
+  // The 'example' property in @ApiProperty will update the Swagger UI.
+  @ApiProperty({ example: 9.006000, description: 'The latitude of the restaurant location' })
+  @IsLatitude()
+  latitude: number;
+
+  @ApiProperty({ example: 38.764000, description: 'The longitude of the restaurant location' })
+  @IsLongitude()
+  longitude: number;
+  // -------------------------
 }
 
 class RestaurantHourDto {

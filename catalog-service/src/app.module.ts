@@ -1,11 +1,11 @@
-// PASTE THIS ENTIRE CODE BLOCK INTO app.module.ts
+// in catalog-service/src/app.module.ts
 
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
 import { CacheModule } from '@nestjs/cache-manager';
-import * as redisStore from 'cache-manager-redis-store';
+import { redisStore } from 'cache-manager-redis-yet'; // The new, correct library
 
 import { OrdersModule } from './modules/order/order.module';
 import { KafkaProvider } from './providers/kafka.provider';
@@ -22,17 +22,29 @@ import { MenuPersonalizationModule } from './modules/menu-personalization/menu-p
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    
+    // --- THIS IS THE FINAL, CORRECTED REDIS CONFIGURATION ---
     CacheModule.registerAsync({
       isGlobal: true,
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        store: redisStore,
-        host: configService.get('REDIS_HOST', 'redis'),
-        port: parseInt(configService.get('REDIS_PORT', '6379'), 10),
-        ttl: 300,
-      }),
+      useFactory: async (configService: ConfigService) => {
+        const store = await redisStore({
+          socket: {
+            host: configService.get('REDIS_HOST', 'localhost'),
+            port: parseInt(configService.get('REDIS_PORT', '6379'), 10),
+          },
+          ttl: 300 * 1000,
+        });
+        
+        // The definitive fix: Return the created store instance directly.
+        return {
+          store,
+        };
+      },
     }),
+    // ---------------------------------------------------------
+
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -50,7 +62,7 @@ import { MenuPersonalizationModule } from './modules/menu-personalization/menu-p
       }),
     }),
     ScheduleModule.forRoot(),
-    SharedModule,
+     SharedModule,
      RestaurantsModule, 
      CategoriesModule, 
      MenuItemsModule, 

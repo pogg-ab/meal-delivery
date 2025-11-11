@@ -97,7 +97,7 @@ export class MenuPersonalizationService {
       try {
         // If your cache-manager supports set(key, value, ttl) you can use number. Otherwise use options object.
         // Using options object for broader compatibility:
-        await this.cacheManager.set(key, menuItems, { ttl: 60 * 30 }); // 30 minutes
+        await this.cacheManager.set(key, menuItems, 60 * 30 ); // 30 minutes
       } catch (err) {
         this.logger.warn('Failed caching personalized menu', err as any);
       }
