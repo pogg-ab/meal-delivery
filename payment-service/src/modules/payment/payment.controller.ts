@@ -91,6 +91,7 @@ return this.svc.findAll(query);
 // GET platform account
 @Get('/internal/payments/platform/subaccount')
 @UseGuards(JwtAuthGuard, RolesGuard)
+@ApiBearerAuth('access-token')
 @Roles('platform_admin')
 @ApiOperation({ summary: 'Get current platform chapa subaccount (internal)' })
 async getPlatformSub(@Headers('x-service-secret') secret?: string) {

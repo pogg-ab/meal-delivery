@@ -13,6 +13,7 @@ import { OrderGateway } from '../../gateways/order.gateway';
 import { KafkaProvider } from 'src/providers/kafka.provider';
 import { CreateOrderDto } from './dtos/create-order.dto';
 import { OrdersPickupService } from './order-pickup.service'; 
+import { MenuPersonalizationService } from '../menu-personalization/menu-personalization.service';
 import { OrderPickup } from '../../entities/order-pickup.entity';
 import { PromoCodeService } from '../promos/promo.service';
 import { CancelOrderDto } from './dtos/cancel-order.dto';
@@ -33,6 +34,7 @@ export class OrdersService {
     private readonly kafka: KafkaProvider,
     private readonly pickupService: OrdersPickupService,
     private readonly promoCodeService: PromoCodeService,
+    private readonly menuPersonalizationService: MenuPersonalizationService,
   ) {}
 
   async createOrder(
@@ -180,17 +182,17 @@ export class OrdersService {
         (this as any).logger?.warn?.('Kafka emit failed for order.created', e as any);
       }
 
+      try {
+        await this.menuPersonalizationService.trackOrderItemsForPersonalization(fullOrder);
+      } catch (e) {
+       // don't fail order creation for personalization errors
+         this.logger?.warn?.('Failed to update personalization for order ' + fullOrder.id, e as any);
+        }
+      
       return fullOrder;
     });
   }
-
-
-
-// src/modules/orders/order.controller.ts (snippet) - pass promo_code
-// in create() handler: change call to ordersService.createOrder(...)
-// const order = await this.ordersService.createOrder(userId, username, phone, dto, dto.promo_code);
-
-  
+ 
 
   /**
    * Owner responds to an order. Emits 'order.awaiting_payment' when accepted.

@@ -17,6 +17,7 @@ import { MenuItemsModule } from './modules/menu-items/menu-items.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { SearchModule } from './modules/search/search.module';
 import { PromosModule } from './modules/promos/promo.module';
+import { MenuPersonalizationModule } from './modules/menu-personalization/menu-personalization.module';
 
 @Module({
   imports: [
@@ -49,7 +50,16 @@ import { PromosModule } from './modules/promos/promo.module';
       }),
     }),
     ScheduleModule.forRoot(),
-    SharedModule, RestaurantsModule, CategoriesModule, MenuItemsModule, InventoryModule, OrdersModule, ReportsModule, SearchModule, PromosModule
+    SharedModule,
+     RestaurantsModule, 
+     CategoriesModule, 
+     MenuItemsModule, 
+     InventoryModule, 
+     OrdersModule, 
+     ReportsModule, 
+     SearchModule, 
+     PromosModule,
+     MenuPersonalizationModule
   ],
   providers: [KafkaProvider],
   exports: [KafkaProvider],
