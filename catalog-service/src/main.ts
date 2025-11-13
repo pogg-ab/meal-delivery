@@ -54,8 +54,12 @@ async function bootstrap() {
   }
 
   // Connect and start the Kafka microservice listener
-  app.connectMicroservice<MicroserviceOptions>(kafkaConfig);
-  await app.startAllMicroservices();
+  try {
+    app.connectMicroservice<MicroserviceOptions>(kafkaConfig);
+    await app.startAllMicroservices();
+  } catch (error) {
+    console.warn('Failed to connect to Kafka, running without microservices');
+  }
 
   // Listen publicly on all network interfaces
   await app.listen(PORT, '0.0.0.0');

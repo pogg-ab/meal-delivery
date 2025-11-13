@@ -13,6 +13,12 @@ class MenuItemInfo {
   @ApiProperty({ example: false })
   is_available: boolean;
 
+  @ApiProperty({ example: 4.5, nullable: true, required: false })
+  average_rating?: number | null;
+
+  @ApiProperty({ example: 127, required: false })
+  total_reviews?: number;
+
   // --- CHANGES START HERE ---
   @ApiProperty({ example: 'a1b2c3d4-e5f6-7890-1234-567890abcdef' })
   categoryId: string;
@@ -28,6 +34,12 @@ export class RestaurantMenuResponseDto {
 
   @ApiProperty({ example: "Mel's Place" })
   restaurantName: string;
+
+  @ApiProperty({ example: 4.3, nullable: true, required: false })
+  restaurantRating?: number | null;
+
+  @ApiProperty({ example: 523, required: false })
+  restaurantTotalReviews?: number;
   
   @ApiProperty({ type: [MenuItemInfo] })
   menuItems: MenuItemInfo[];

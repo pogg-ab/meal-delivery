@@ -18,6 +18,7 @@ import { InventoryModule } from './modules/inventory/inventory.module';
 import { SearchModule } from './modules/search/search.module';
 import { PromosModule } from './modules/promos/promo.module';
 import { MenuPersonalizationModule } from './modules/menu-personalization/menu-personalization.module';
+import { ReviewsModule } from './modules/reviews/reviews.module';
 
 @Module({
   imports: [
@@ -71,7 +72,8 @@ import { MenuPersonalizationModule } from './modules/menu-personalization/menu-p
      ReportsModule, 
      SearchModule, 
      PromosModule,
-     MenuPersonalizationModule
+     MenuPersonalizationModule,
+     ReviewsModule
   ],
   providers: [KafkaProvider],
   exports: [KafkaProvider],
