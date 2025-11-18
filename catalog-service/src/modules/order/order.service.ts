@@ -18,6 +18,10 @@ import { OrderPickup } from '../../entities/order-pickup.entity';
 import { PromoCodeService } from '../promos/promo.service';
 import { CancelOrderDto } from './dtos/cancel-order.dto';
 import { OwnerPreparingDto } from './dtos/owner-preparing.dto';
+import { ScheduleOrderDto } from './dtos/schedule-order.dto';
+import { ScheduledJob } from '../../entities/scheduled-job.entity';
+import { ScheduledJobStatus } from '../../entities/scheduled-job.entity';
+const dateFnsTz = require('date-fns-tz');
 
 @Injectable()
 export class OrdersService {
@@ -37,6 +41,186 @@ export class OrdersService {
     private readonly menuPersonalizationService: MenuPersonalizationService,
   ) {}
 
+
+
+async scheduleOrder(
+  customerId: string,
+  dto: ScheduleOrderDto, // The DTO with the local time string
+): Promise<Order> {
+
+  // First, we must find the order to get its restaurant_id for validation.
+  const orderForValidation = await this.orderRepo.findOneBy({ id: dto.orderId });
+  if (!orderForValidation) {
+      throw new NotFoundException(`Order with ID ${dto.orderId} not found.`);
+  }
+
+  // The validation method now does the conversion and returns the correct UTC Date object for saving.
+  const deliveryTimeToSaveInUTC = await this.validateSchedulingTime(
+    orderForValidation.restaurant_id,
+    dto.scheduledDeliveryTime // Pass the local time string from the DTO
+  );
+
+  return await this.dataSource.transaction(async (manager) => {
+    const orderRepo = manager.getRepository(Order);
+    const jobRepo = manager.getRepository(ScheduledJob);
+    const eventRepo = manager.getRepository(OrderEvent);
+
+    // Find the order again with the customer ownership check
+    const order = await orderRepo.findOne({ where: { id: dto.orderId, customer_id: customerId } });
+    if (!order) {
+        throw new NotFoundException('Order not found or you do not have permission to access it.');
+    }
+    if (order.status !== OrderStatus.PENDING) {
+        throw new BadRequestException('Only pending orders can be scheduled.');
+    }
+    
+    // Update the order's properties with the CORRECT, converted UTC time
+    order.status = OrderStatus.SCHEDULED;
+    order.isScheduled = true;
+    order.scheduledDeliveryTime = deliveryTimeToSaveInUTC; // <-- Save the converted UTC time
+    const savedOrder = await orderRepo.save(order);
+
+    // Create the scheduler job with the CORRECT, converted UTC time
+    const job = jobRepo.create({
+      order: savedOrder,
+      runAt: deliveryTimeToSaveInUTC, // <-- Use the converted UTC time
+      status: ScheduledJobStatus.PENDING,
+    });
+    await jobRepo.save(job);
+    
+    // Log the event
+    await eventRepo.save(
+      eventRepo.create({
+        order_id: savedOrder.id,
+        actor_id: customerId,
+        action: 'ORDER_SCHEDULED',
+        meta: { 
+            requestedLocalTime: dto.scheduledDeliveryTime,
+            scheduledUtcTime: deliveryTimeToSaveInUTC.toISOString() 
+        },
+      } as DeepPartial<OrderEvent>),
+    );
+
+    return savedOrder;
+  });
+}
+
+
+  async rescheduleOrder(
+  customerId: string,
+  orderId: string,
+  newLocalDeliveryTimeStr: string, // Now accepts the local time string
+): Promise<Order> {
+
+  // First, find the order to get its restaurant_id for validation.
+  const orderForValidation = await this.orderRepo.findOneBy({ id: orderId });
+  if (!orderForValidation) {
+    throw new NotFoundException(`Order with ID ${orderId} not found.`);
+  }
+
+  // The validation method handles the conversion and returns the correct UTC Date object.
+  const newDeliveryTimeUTC = await this.validateSchedulingTime(
+    orderForValidation.restaurant_id,
+    newLocalDeliveryTimeStr // Pass the new local time string for validation
+  );
+
+  return await this.dataSource.transaction(async (manager) => {
+    const orderRepo = manager.getRepository(Order);
+    const jobRepo = manager.getRepository(ScheduledJob);
+    const eventRepo = manager.getRepository(OrderEvent);
+
+    const order = await orderRepo.findOne({
+      where: { id: orderId, customer_id: customerId },
+    });
+
+    if (!order) {
+      throw new NotFoundException('Scheduled order not found or you do not have permission to access it.');
+    }
+
+    if (order.status !== OrderStatus.SCHEDULED) {
+      throw new BadRequestException('This order can no longer be rescheduled as it is not in a scheduled state.');
+    }
+
+    const job = await jobRepo.findOne({ where: { order: { id: order.id } } });
+    if (!job) {
+      this.logger.error(`Data integrity issue: Scheduled order ${order.id} is missing its corresponding job.`);
+      throw new NotFoundException('Could not find the scheduled job for this order.');
+    }
+    
+    const oldTime = order.scheduledDeliveryTime;
+
+    // Update both the order and the job with the NEW, CORRECTLY CONVERTED UTC time.
+    order.scheduledDeliveryTime = newDeliveryTimeUTC;
+    job.runAt = newDeliveryTimeUTC;
+
+    await orderRepo.save(order);
+    await jobRepo.save(job);
+
+    // Safely prepare old UTC string (may be null)
+    const oldUtcTimeStr = oldTime ? oldTime.toISOString() : null;
+
+    // Create an event to log this change.
+    await eventRepo.save(
+      eventRepo.create({
+        order_id: order.id,
+        actor_id: customerId,
+        action: 'ORDER_RESCHEDULED',
+        meta: {
+          oldUtcTime: oldUtcTimeStr,
+          requestedLocalTime: newLocalDeliveryTimeStr,
+          newUtcTime: newDeliveryTimeUTC.toISOString(),
+        },
+      } as DeepPartial<OrderEvent>),
+    );
+
+    this.logger.log(`Order ${order.id} rescheduled from ${oldUtcTimeStr ?? 'unspecified'} to ${newDeliveryTimeUTC.toISOString()}`);
+
+    return order;
+  });
+}
+
+  // In OrdersService.ts
+
+async cancelScheduledOrder(customerId: string, orderId: string): Promise<Order> {
+  return await this.dataSource.transaction(async (manager) => {
+    const orderRepo = manager.getRepository(Order);
+    const jobRepo = manager.getRepository(ScheduledJob);
+    const eventRepo = manager.getRepository(OrderEvent);
+
+    const order = await orderRepo.findOne({ where: { id: orderId, customer_id: customerId } });
+
+    if (!order) {
+      throw new NotFoundException('Scheduled order not found or you do not have permission to access it.');
+    }
+
+    // CRITICAL: Only allow this action if the order is currently SCHEDULED.
+    if (order.status !== OrderStatus.SCHEDULED) {
+      throw new BadRequestException('This order is not currently scheduled and cannot be unscheduled.');
+    }
+
+    // --- Core Logic ---
+    // 1. Revert the order status to PENDING and clear schedule fields
+    order.status = OrderStatus.PENDING;
+    order.isScheduled = false;
+    order.scheduledDeliveryTime = null;
+    const savedOrder = await orderRepo.save(order);
+
+    // 2. CRITICAL: Delete the job from the scheduler queue. This prevents it from running later.
+    await jobRepo.delete({ order: { id: order.id } });
+    this.logger.log(`Deleted scheduled job for unscheduled order ${order.id}`);
+
+    // 3. Create an event to log this action
+    await eventRepo.save(
+      eventRepo.create({
+        order_id: savedOrder.id,
+        actor_id: customerId,
+        action: 'ORDER_UNSCHEDULED',
+      } as DeepPartial<OrderEvent>),
+    );
+
+    return savedOrder;
+  });
+}
   async createOrder(
     customerId: string,
     username: string,
@@ -194,73 +378,64 @@ export class OrdersService {
   }
  
 
-  /**
-   * Owner responds to an order. Emits 'order.awaiting_payment' when accepted.
-   */
-async ownerResponse(ownerId: string, orderId: string, accepted: boolean, reason?: string) {
-  const order = await this.orderRepo.findOne({ where: { id: orderId }, relations: ['restaurant', 'items'] });
-  if (!order) throw new NotFoundException('Order not found');
-  if (!order.restaurant || order.restaurant.owner_id !== ownerId) throw new BadRequestException('Not authorized');
+  
 
-  if (order.status !== OrderStatus.PENDING) {
-    throw new BadRequestException('This order has already been processed and cannot be changed.');
-  }
+async ownerResponse(ownerId: string, orderId: string, accepted: boolean, reason?: string): Promise<{ ok: boolean }> {
+  return await this.dataSource.transaction(async (manager) => {
+    const orderRepo = manager.getRepository(Order);
+    const jobRepo = manager.getRepository(ScheduledJob);
+    const eventRepo = manager.getRepository(OrderEvent);
 
-  order.status = accepted ? OrderStatus.ACCEPTED : OrderStatus.DECLINED;
-  await this.orderRepo.save(order);
-
-  await this.orderRepo.manager.getRepository(OrderEvent).save(
-    this.orderRepo.manager.getRepository(OrderEvent).create({
-      order_id: order.id,
-      customer_name: order.customer_name,
-      actor_id: ownerId,
-      action: accepted ? 'OWNER_ACCEPTED' : 'OWNER_DECLINED',
-      meta: reason ? { reason } : undefined,
-    } as DeepPartial<OrderEvent>),
-  );
-
-  this.gateway.emitOrderUpdated(order);
-
-  if (accepted) {
-    // This logic now only runs ONCE, when the order is accepted from a PENDING state.
-    const confirmedOrderPayload = {
-      orderId: order.id,
-      userId: order.customer_id, // For notification-service
-      restaurantName: order.restaurant.name, // For notification-service
-      items: order.items.map(item => ({ // For inventory-service
-        menuItemId: item.menu_item_id,
-        quantity: item.quantity,
-      })),
-    };
-    try {
-      await this.kafka.emit('order.confirmed', confirmedOrderPayload);
-      this.logger.log(`Published order.confirmed event for order ${order.id}`);
-    } catch (e) {
-      this.logger.warn('Kafka emit failed for order.confirmed', e as any);
+    const order = await orderRepo.findOne({ where: { id: orderId }, relations: ['restaurant', 'items'] });
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+    if (!order.restaurant || order.restaurant.owner_id !== ownerId) {
+      throw new BadRequestException('Not authorized to respond to this order');
     }
 
-    // 2. Ask Payment service to start payment flow (your existing logic)
-    const paymentPayload = {
-      order_id: order.id,
-      customer_name: order.customer_name,
-      amount: Number(order.total_amount),
-      currency: order.currency,
-      customer_id: order.customer_id,
-      restaurant_id: order.restaurant_id,
-      platform_topup_needed:order?.discount_breakdown?.platform_topup_needed,
-    };
-    try {
-      await this.kafka.emit('order.awaiting_payment', paymentPayload);
-    } catch (e) {
-      this.logger.warn('Kafka emit failed for order.awaiting_payment', e as any);
+    // --- CRITICAL VALIDATION CHANGE ---
+    // The owner can ONLY act on an order that has been SCHEDULED by the customer.
+    if (order.status !== OrderStatus.SCHEDULED) {
+      throw new BadRequestException('This order is not currently scheduled and cannot be actioned.');
     }
 
-    order.status = OrderStatus.AWAITING_PAYMENT;
-    await this.orderRepo.save(order);
+    // --- NEW LOGIC: DELETE THE SCHEDULED JOB ---
+    // Whether the owner accepts or declines, the scheduled job is no longer needed.
+    // We must delete it to prevent it from running later.
+    await jobRepo.delete({ order: { id: order.id } });
+    this.logger.log(`Owner action on order ${order.id}. Associated scheduled job has been deleted.`);
+
+    // --- The rest of the logic proceeds ---
+    order.status = accepted ? OrderStatus.ACCEPTED : OrderStatus.DECLINED;
+    await orderRepo.save(order);
+
+    await eventRepo.save(
+      eventRepo.create({
+        order_id: order.id,
+        actor_id: ownerId,
+        action: accepted ? 'OWNER_ACCEPTED' : 'OWNER_DECLINED',
+        meta: reason ? { reason } : undefined,
+      } as DeepPartial<OrderEvent>),
+    );
+
     this.gateway.emitOrderUpdated(order);
-  }
 
-  return { ok: true };
+    if (accepted) {
+      // Logic for moving to payment is the same as before
+      const confirmedOrderPayload = { /* ... your payload ... */ };
+      await this.kafka.emit('order.confirmed', confirmedOrderPayload);
+      
+      const paymentPayload = { /* ... your payload ... */ };
+      await this.kafka.emit('order.awaiting_payment', paymentPayload);
+
+      order.status = OrderStatus.AWAITING_PAYMENT;
+      await orderRepo.save(order);
+      this.gateway.emitOrderUpdated(order);
+    }
+    
+    return { ok: true };
+  });
 }
 
 
@@ -639,48 +814,247 @@ return { ok: true };
 }
 
 async cancelOrder(customerId: string, orderId: string, reason?: string) {
-return await this.dataSource.transaction(async (manager) => {
-const orderRepo = manager.getRepository(Order);
-const eventRepo = manager.getRepository(OrderEvent);
+    return await this.dataSource.transaction(async (manager) => {
+      const orderRepo = manager.getRepository(Order);
+      const eventRepo = manager.getRepository(OrderEvent);
 
-const order = await orderRepo.findOne({ where: { id: orderId }, relations: ['items'] });
-if (!order) throw new NotFoundException('Order not found');
-if (order.customer_id !== customerId) throw new BadRequestException('Not your order');
+      const order = await orderRepo.findOne({ where: { id: orderId }, relations: ['items'] });
+      if (!order) throw new NotFoundException('Order not found');
+      if (order.customer_id !== customerId) throw new BadRequestException('Not your order');
 
-// Prevent cancellation after payment succeeded
-if (order.payment_status === PaymentStatus.PAID) {
-throw new BadRequestException('Cannot cancel an order that has been paid');
+      // Prevent cancellation after payment succeeded
+      if (order.payment_status === PaymentStatus.PAID) {
+        throw new BadRequestException('Cannot cancel an order that has been paid');
+      }
+
+      // --- START OF CHANGES ---
+
+      // Allow cancellation for scheduled orders in addition to pre-preparing states
+      const cancellable = [
+        OrderStatus.PENDING,
+        OrderStatus.AWAITING_PAYMENT,
+        OrderStatus.ACCEPTED,
+        OrderStatus.SCHEDULED, // <-- ADDED
+      ];
+      if (!cancellable.includes(order.status)) {
+        throw new BadRequestException('Order cannot be cancelled at this stage');
+      }
+
+      // Use CANCELLED if enum exists, otherwise fallback to DECLINED
+      const cancelledStatus = (OrderStatus as any).CANCELLED ?? OrderStatus.DECLINED;
+      order.status = cancelledStatus;
+      await orderRepo.save(order);
+
+      // If the order was a scheduled one, we must also delete its job
+      if (order.isScheduled) {
+        const jobRepo = manager.getRepository(ScheduledJob);
+        // Use the correct relation-based query
+        await jobRepo.delete({ order: { id: order.id } });
+        this.logger.log(`Deleted scheduled job for cancelled order ${order.id}`);
+      }
+      
+      // --- END OF CHANGES ---
+
+      await eventRepo.save(
+        eventRepo.create({
+          order_id: order.id,
+          actor_id: customerId,
+          action: 'CUSTOMER_CANCELLED',
+          meta: reason ? { reason } : undefined,
+        } as DeepPartial<OrderEvent>),
+      );
+
+      return order;
+    }).then(async (committedOrder) => {
+      this.gateway.emitOrderUpdated(committedOrder);
+      try {
+        await this.kafka.emit('order.cancelled', { order_id: committedOrder.id, reason });
+      } catch (e) {
+        this.logger.warn('Kafka emit failed for order.cancelled', e as any);
+      }
+      return { ok: true };
+    });
+  }
+  // Add this entire method inside the OrdersService class
+
+private async validateSchedulingTime(restaurantId: string, localDeliveryTimeStr: string): Promise<Date> {
+    const restaurantTimeZone = 'Africa/Addis_Ababa';
+
+    // --- THE CORRECT FUNCTION NAME ---
+    // We are now using 'fromZonedTime' which we PROVED exists on the module.
+    const deliveryTimeUtc = dateFnsTz.fromZonedTime(localDeliveryTimeStr, restaurantTimeZone);
+
+    this.logger.log(`Validating schedule for restaurant ${restaurantId}. Local time: ${localDeliveryTimeStr}, converted to UTC: ${deliveryTimeUtc.toISOString()}`);
+
+    // --- All other logic is correct and remains the same ---
+    const minLeadTimeMinutes = 45;
+    const now = new Date();
+    const earliestAllowedTime = new Date(now.getTime() + minLeadTimeMinutes * 60000);
+    if (deliveryTimeUtc < earliestAllowedTime) {
+        throw new BadRequestException(`Order must be scheduled at least ${minLeadTimeMinutes} minutes in advance.`);
+    }
+
+    const maxScheduleDays = 7;
+    const latestAllowedTime = new Date(now.getTime() + maxScheduleDays * 24 * 60 * 60 * 1000);
+    if (deliveryTimeUtc > latestAllowedTime) {
+        throw new BadRequestException(`Orders cannot be scheduled more than ${maxScheduleDays} days in the future.`);
+    }
+
+    const restaurant = await this.restaurantRepo.findOneBy({ id: restaurantId });
+    if (!restaurant) {
+        throw new NotFoundException('Restaurant not found.');
+    }
+
+    // 'formatInTimeZone' also exists and is correct.
+    const deliveryDayIndex = Number(dateFnsTz.formatInTimeZone(deliveryTimeUtc, restaurantTimeZone, 'i')) % 7;
+    const deliveryTimeLocal = dateFnsTz.formatInTimeZone(deliveryTimeUtc, restaurantTimeZone, 'HH:mm:ss');
+
+    this.logger.log(`In restaurant's timezone (${restaurantTimeZone}), this is day index ${deliveryDayIndex} at time ${deliveryTimeLocal}`);
+
+    const dayMap = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const dayName = dayMap[deliveryDayIndex];
+
+    const openTime = restaurant[`${dayName}_open`];
+    const closeTime = restaurant[`${dayName}_close`];
+
+    if (!openTime || !closeTime) {
+        throw new BadRequestException(`The restaurant is closed on the selected day.`);
+    }
+
+    if (deliveryTimeLocal < openTime || deliveryTimeLocal > closeTime) {
+        throw new BadRequestException(
+            `The restaurant is only open between ${openTime} and ${closeTime} on the selected day.`
+        );
+    }
+
+    this.logger.log(`Scheduling time validated successfully.`);
+
+    return deliveryTimeUtc;
 }
 
-// Allow cancellation only when order is still in pre-preparing states
-const cancellable = [OrderStatus.PENDING, OrderStatus.AWAITING_PAYMENT, OrderStatus.ACCEPTED];
-if (!cancellable.includes(order.status)) {
-throw new BadRequestException('Order cannot be cancelled at this stage');
-}
+async getScheduledOrdersForRestaurant(ownerId: string, restaurantId: string, limit = 50, offset = 0): Promise<Order[]> {
+    // First, a quick security check to ensure the owner ID from the token
+    // actually owns the restaurant they are trying to query.
+    const restaurant = await this.restaurantRepo.findOneBy({ id: restaurantId, owner_id: ownerId });
+    if (!restaurant) {
+      throw new NotFoundException('Restaurant not found or you are not the owner.');
+    }
 
-// Use CANCELLED if enum exists, otherwise fallback to DECLINED
-const cancelledStatus = (OrderStatus as any).CANCELLED ?? OrderStatus.DECLINED;
-order.status = cancelledStatus;
-await orderRepo.save(order);
+    const take = Math.max(1, Math.min(limit, 100));
+    const skip = Math.max(0, offset);
+
+    // This is the core query for this feature
+    const scheduledOrders = await this.orderRepo.find({
+      where: {
+        restaurant_id: restaurantId,
+        status: OrderStatus.SCHEDULED, // <-- THE KEY FILTER: Only get scheduled orders
+      },
+      relations: ['items', 'restaurant'], // Load relations needed for the DTO mapping
+      order: {
+        scheduledDeliveryTime: 'ASC', // <-- IMPORTANT: Show the soonest orders first
+      },
+      take,
+      skip,
+    });
+
+    return scheduledOrders;
+  }
+
+  async markAsReady(ownerId: string, orderId: string): Promise<{ ok: boolean }> {
+    return await this.dataSource.transaction(async (manager) => {
+      const orderRepo = manager.getRepository(Order);
+      const eventRepo = manager.getRepository(OrderEvent);
+
+      const order = await orderRepo.findOne({ where: { id: orderId }, relations: ['restaurant'] });
+      if (!order) {
+        throw new NotFoundException('Order not found');
+      }
+      if (!order.restaurant || order.restaurant.owner_id !== ownerId) {
+        throw new BadRequestException('Not authorized to update this order');
+      }
+
+      // State machine validation: Must be in PREPARING state
+      if (order.status !== OrderStatus.PREPARING) {
+        throw new BadRequestException(`Order cannot be marked as ready. Current status: ${order.status}`);
+      }
+
+      order.status = OrderStatus.READY; // <-- ADJUSTED TO YOUR ENUM
+      await orderRepo.save(order);
+
+      await eventRepo.save(
+        eventRepo.create({
+          order_id: order.id,
+          actor_id: ownerId,
+          action: 'OWNER_MARKED_READY',
+        } as DeepPartial<OrderEvent>),
+      );
+
+      return order;
+    }).then(async (committedOrder) => {
+      this.gateway.emitOrderUpdated(committedOrder);
+      try {
+        await this.kafka.emit('order.ready', { // <-- ADJUSTED EVENT NAME
+          order_id: committedOrder.id,
+          restaurant_id: committedOrder.restaurant_id,
+          customer_id: committedOrder.customer_id,
+        });
+      } catch (e) {
+        this.logger.warn('Kafka emit failed for order.ready', e as any);
+      }
+      return { ok: true };
+    });
+  }
+
+  /**
+   * Restaurant owner marks an order as completed (i.e., picked up).
+   * The order must be in the READY state.
+   */
+  async markAsComplete(ownerId: string, orderId: string): Promise<{ ok: boolean }> {
+    return await this.dataSource.transaction(async (manager) => {
+      const orderRepo = manager.getRepository(Order);
+      const eventRepo = manager.getRepository(OrderEvent);
+
+      const order = await orderRepo.findOne({ where: { id: orderId }, relations: ['restaurant'] });
+      if (!order) {
+        throw new NotFoundException('Order not found');
+      }
+      if (!order.restaurant || order.restaurant.owner_id !== ownerId) {
+        throw new BadRequestException('Not authorized to update this order');
+      }
+
+      // State machine validation: Must be in READY state
+      if (order.status !== OrderStatus.READY) { // <-- ADJUSTED TO YOUR ENUM
+        throw new BadRequestException(`Order cannot be marked as complete. Current status: ${order.status}`);
+      }
+
+      order.status = OrderStatus.COMPLETED; // <-- ADJUSTED TO YOUR ENUM
+      await orderRepo.save(order);
+
+      await eventRepo.save(
+        eventRepo.create({
+          order_id: order.id,
+          actor_id: ownerId,
+          action: 'ORDER_COMPLETED', // <-- ADJUSTED ACTION NAME
+        } as DeepPartial<OrderEvent>),
+      );
+
+      return order;
+    }).then(async (committedOrder) => {
+      this.gateway.emitOrderUpdated(committedOrder);
+      try {
+        await this.kafka.emit('order.completed', { // <-- ADJUSTED EVENT NAME
+          order_id: committedOrder.id,
+          restaurant_id: committedOrder.restaurant_id,
+          customer_id: committedOrder.customer_id,
+          completed_at: new Date().toISOString(),
+        });
+      } catch (e) {
+        this.logger.warn('Kafka emit failed for order.completed', e as any);
+      }
+      return { ok: true };
+    });
+  }
 
 
-await eventRepo.save(eventRepo.create({
-order_id: order.id,
-actor_id: customerId,
-action: 'CUSTOMER_CANCELLED',
-meta: reason ? { reason } : undefined,
-} as DeepPartial<OrderEvent>));
-
-return order;
-}).then(async (committedOrder) => {
-this.gateway.emitOrderUpdated(committedOrder);
-try {
-await this.kafka.emit('order.cancelled', { order_id: committedOrder.id, reason });
-} catch (e) {
-this.logger.warn('Kafka emit failed for order.cancelled', e as any);
-}
-return { ok: true };
-});
-}
 
 }

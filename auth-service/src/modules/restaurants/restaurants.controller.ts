@@ -52,10 +52,23 @@ export class RestaurantsController {
     return this.restaurantsService.register(registerRestaurantDto, ownerId);
   }
 
-  @Post(':id/documents')
+ @Post(':id/documents')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Upload a verification document for a restaurant' })
+  @ApiResponse({ 
+    status: 201, 
+    description: 'Document uploaded successfully. Returns a URL to view the document.',
+    schema: {
+      type: 'object',
+      properties: {
+        url: {
+          type: 'string',
+          example: 'http://localhost:3000/restaurants/your-restaurant-id/documents/BUSINESS_LICENSE'
+        }
+      }
+    }
+  })
   @UseInterceptors(FileInterceptor('file'))
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -85,7 +98,7 @@ export class RestaurantsController {
       }),
     ) file: Express.Multer.File,
     @Req() req,
-  ) {
+  ): Promise<{ url: string }> {
     const ownerId = req.user.userId;
     return this.restaurantsService.addDocument(
       ownerId,

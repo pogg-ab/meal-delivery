@@ -37,11 +37,22 @@ export class MenuItem {
   @DeleteDateColumn()
   deleted_at: Date;
 
+  // --- ADD THIS COLUMN DEFINITION ---
+  @Column({ 
+    type: 'tsvector', 
+    select: false,
+    nullable: true 
+  })
+  document_tsvector: any;
+  // --- END OF ADDITION ---
+
   @ManyToOne(() => MenuCategory, (category) => category.menu_items)
   @JoinColumn({ name: 'category_id' })
   category: MenuCategory;
   
- @OneToOne(() => Inventory, (inventory) => inventory.menu_item) // Updated to match Inventory entity
+  @OneToOne(() => Inventory, (inventory) => inventory.menu_item)
   inventory: Inventory;
+  
+  
   restaurant: any;
 }

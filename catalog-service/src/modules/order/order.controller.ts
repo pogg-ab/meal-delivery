@@ -15,6 +15,7 @@ import {
   ForbiddenException,
   UnauthorizedException,
   NotFoundException,
+  Delete,
 } from '@nestjs/common';
 import { OrdersService } from './order.service';
 import { CreateOrderDto } from './dtos/create-order.dto';
@@ -41,6 +42,8 @@ import { OrdersPickupService } from './order-pickup.service';
 import { VerifyPickupDto } from './dtos/verify-pickup.dto';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 import { Roles } from 'src/common/decorator/roles.decorator';
+import { ScheduleOrderDto } from './dtos/schedule-order.dto';
+import { RescheduleOrderDto } from './dtos/reschedule-order.dto';
 
 @ApiTags('Orders')
 @Controller('orders')
@@ -106,6 +109,74 @@ export class OrdersController {
     return this.mapOrderToDto(order);
   }
 
+ // In OrdersController.ts
+
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth('access-token')
+@Post('schedule')
+@ApiOperation({ summary: 'Schedules an existing PENDING order for a future time' })
+@ApiBody({ type: ScheduleOrderDto }) // Uses our new DTO
+@ApiResponse({ status: 200, description: 'Order successfully scheduled', type: OrderResponseDto })
+@ApiResponse({ status: 400, description: 'Bad Request (e.g., order is not pending)' })
+async scheduleOrder(
+  @Req() req: any,
+  @Body() dto: ScheduleOrderDto,
+): Promise<OrderResponseDto> {
+  const customerId = this.getUserIdFromReq(req);
+  if (!customerId) {
+    throw new UnauthorizedException('User ID could not be determined from token.');
+  }
+  
+  // Call the service method with the new, simpler signature
+  const scheduledOrder = await this.ordersService.scheduleOrder(customerId, dto);
+  
+  return this.mapOrderToDto(scheduledOrder);
+}
+
+ @UseGuards(JwtAuthGuard)
+@ApiBearerAuth('access-token')
+@Patch(':id/reschedule')
+@ApiOperation({ summary: 'Customer reschedules their order (if allowed by status)' })
+@ApiParam({ name: 'id', description: 'The ID of the scheduled order' })
+@ApiBody({ type: RescheduleOrderDto }) // Uses the updated DTO
+@ApiResponse({ status: 200, description: 'Order successfully rescheduled', type: OrderResponseDto })
+async reschedule(
+  @Req() req: any,
+  @Param('id', new ParseUUIDPipe()) id: string,
+  @Body() dto: RescheduleOrderDto,
+): Promise<OrderResponseDto> {
+  const customerId = this.getUserIdFromReq(req);
+  if (!customerId) {
+    throw new UnauthorizedException('User ID could not be determined from token.');
+  }
+  
+  // Pass the new local time string from the DTO to the service
+  const updatedOrder = await this.ordersService.rescheduleOrder(
+    customerId,
+    id,
+    dto.newDeliveryTime,
+  );
+  
+  return this.mapOrderToDto(updatedOrder);
+}
+
+
+  @UseGuards(JwtAuthGuard)
+@ApiBearerAuth('access-token')
+@Delete(':id/schedule')
+@ApiOperation({ summary: 'Customer cancels the schedule for an order, returning it to PENDING' })
+@ApiParam({ name: 'id', description: 'The ID of the SCHEDULED order' })
+@ApiResponse({ status: 200, description: 'Schedule cancelled successfully', type: OrderResponseDto })
+@ApiResponse({ status: 400, description: 'Bad Request (e.g., order is not in a scheduled state)'})
+async cancelSchedule(
+  @Req() req: any,
+  @Param('id', new ParseUUIDPipe()) id: string,
+): Promise<OrderResponseDto> {
+  const customerId = this.getUserIdFromReq(req);
+  const updatedOrder = await this.ordersService.cancelScheduledOrder(customerId, id);
+  return this.mapOrderToDto(updatedOrder);
+}
+
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('access-token')
   @Post(':id/owner-response')
@@ -119,6 +190,35 @@ export class OrdersController {
   ) {
     const ownerId = this.getUserIdFromReq(req);
     return this.ordersService.ownerResponse(ownerId, id, body.accepted, body.reason);
+  }
+
+  
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @Get('/restaurants/scheduled')
+  @ApiOperation({ summary: 'List all SCHEDULED orders for the restaurant owner' })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'offset', required: false, type: Number })
+  @ApiResponse({ status: 200, type: OrderResponseDto, isArray: true })
+  async listScheduledOrdersForOwner(
+    @Req() req: any,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ): Promise<OrderResponseDto[]> {
+    const ownerId = this.getUserIdFromReq(req);
+    const restaurantId: string | null = req.user?.restaurantId ?? null;
+
+    if (!restaurantId) {
+      throw new BadRequestException('Restaurant ID missing from token');
+    }
+
+    const l = limit ? Math.min(Number(limit), 100) : 50;
+    const o = offset ? Math.max(Number(offset), 0) : 0;
+
+    const orders = await this.ordersService.getScheduledOrdersForRestaurant(ownerId, restaurantId, l, o);
+    
+    return orders.map((o) => this.mapOrderToDto(o));
   }
 
   @UseGuards(JwtAuthGuard)
@@ -345,6 +445,43 @@ async getPickupForCustomer(
     expires_at: pickup.expires_at ?? undefined,
   };
 }
+@UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @Patch(':id/ready') // <-- ADJUSTED ENDPOINT
+  @ApiOperation({ summary: "Owner marks an order as 'Ready' (restaurant owner only)." }) // <-- ADJUSTED SUMMARY
+  @ApiParam({ name: 'id', description: 'Order id' })
+  @ApiResponse({ status: 200, description: 'Order status updated to READY' })
+  @ApiResponse({ status: 400, description: 'Order is not in the correct state (e.g., not PREPARING)' })
+  async markAsReady( // <-- ADJUSTED METHOD NAME
+    @Req() req: any,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
+    const ownerId = this.getUserIdFromReq(req);
+    if (!ownerId) {
+      throw new UnauthorizedException('User ID could not be determined from token.');
+    }
+    return this.ordersService.markAsReady(ownerId, id); // <-- ADJUSTED SERVICE CALL
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @Patch(':id/complete') // <-- ADJUSTED ENDPOINT
+  @ApiOperation({ summary: "Owner marks an order as 'Completed' (restaurant owner only)." }) // <-- ADJUSTED SUMMARY
+  @ApiParam({ name: 'id', description: 'Order id' })
+  @ApiResponse({ status: 200, description: 'Order status updated to COMPLETED' })
+  @ApiResponse({ status: 400, description: 'Order is not in the correct state (e.g., not READY)' })
+  async markAsComplete( // <-- ADJUSTED METHOD NAME
+    @Req() req: any,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
+    const ownerId = this.getUserIdFromReq(req);
+    if (!ownerId) {
+      throw new UnauthorizedException('User ID could not be determined from token.');
+    }
+    return this.ordersService.markAsComplete(ownerId, id); // <-- ADJUSTED SERVICE CALL
+  }
+
+
 
 // OrdersController (excerpt)
 @Post(':id/pickup/verify')
@@ -404,6 +541,8 @@ async verifyPickup(
     },
   };
 }
+
+
 
 
 

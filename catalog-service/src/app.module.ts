@@ -21,9 +21,8 @@ import { MenuPersonalizationModule } from './modules/menu-personalization/menu-p
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
     ConfigModule.forRoot({ isGlobal: true }),
-    
-    // --- THIS IS THE FINAL, CORRECTED REDIS CONFIGURATION ---
     CacheModule.registerAsync({
       isGlobal: true,
       imports: [ConfigModule],
@@ -37,29 +36,46 @@ import { MenuPersonalizationModule } from './modules/menu-personalization/menu-p
           ttl: 300 * 1000,
         });
         
-        // The definitive fix: Return the created store instance directly.
+       
         return {
           store,
         };
       },
     }),
-    // ---------------------------------------------------------
+   
 
-    TypeOrmModule.forRootAsync({
+   TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (cfg: ConfigService) => ({
-        type: 'postgres',
-        host: cfg.get('POSTGRES_HOST'),
-        port: cfg.get<number>('POSTGRES_PORT'),
-        username: cfg.get('POSTGRES_USER'),
-        password: cfg.get('POSTGRES_PASSWORD'),
-        database: cfg.get('POSTGRES_DB'),
-        entities: [__dirname + '/**/*.entity{.ts,.js}'],
-        synchronize: false,
-        migrationsRun: true,
-        migrations: [__dirname + '/migrations/*{.ts,.js}'],
-      }),
+      useFactory: (cfg: ConfigService) => {
+
+        // --- START OF DIAGNOSTIC CODE ---
+        const host = cfg.get('POSTGRES_HOST');
+        const port = cfg.get<number>('POSTGRES_PORT');
+        const username = cfg.get('POSTGRES_USER');
+        const database = cfg.get('POSTGRES_DB');
+
+        console.log('\n\n\x1b[31m%s\x1b[0m', '--- [CRITICAL] DATABASE CONNECTION BOOTSTRAP LOG ---');
+        console.log(`\x1b[33m  [*] Target Host:     \x1b[0m${host}`);
+        console.log(`\x1b[33m  [*] Target Port:     \x1b[0m${port}`);
+        console.log(`\x1b[33m  [*] Target Username: \x1b[0m${username}`);
+        console.log(`\x1b[33m  [*] Target Database: \x1b[0m${database}`);
+        console.log('\x1b[31m%s\x1b[0m', '---------------------------------------------------\n\n');
+        // --- END OF DIAGNOSTIC CODE ---
+
+        return {
+          type: 'postgres',
+          host: host, // Use the variable we just logged
+          port: port, // Use the variable we just logged
+          username: username, // Use the variable we just logged
+          password: cfg.get('POSTGRES_PASSWORD'),
+          database: database, // Use the variable we just logged
+          entities: [__dirname + '/**/*.entity{.ts,.js}'],
+          synchronize: false,
+          migrationsRun: true,
+          migrations: [__dirname + '/migrations/*{.ts,.js}'],
+        };
+      },
     }),
     ScheduleModule.forRoot(),
      SharedModule,

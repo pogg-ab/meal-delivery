@@ -23,7 +23,22 @@ interface RestaurantEventPayload {
   description: string; // New field
   owner_id: string;
   is_active: boolean;
-  address: AddressPayload | null; // New nested object
+  address: AddressPayload | null; 
+
+  sunday_open?: string | null;
+  sunday_close?: string | null;
+  monday_open?: string | null;
+  monday_close?: string | null;
+  tuesday_open?: string | null;
+  tuesday_close?: string | null;
+  wednesday_open?: string | null;
+  wednesday_close?: string | null;
+  thursday_open?: string | null;
+  thursday_close?: string | null;
+  friday_open?: string | null;
+  friday_close?: string | null;
+  saturday_open?: string | null;
+  saturday_close?: string | null;
 }
 
 @Controller()
@@ -59,6 +74,21 @@ export class RestaurantsConsumer {
       country: data.address ? data.address.country : null,
       latitude: data.address ? data.address.latitude : null,
       longitude: data.address ? data.address.longitude : null,
+
+      sunday_open: data.sunday_open,
+      sunday_close: data.sunday_close,
+      monday_open: data.monday_open,
+      monday_close: data.monday_close,
+      tuesday_open: data.tuesday_open,
+      tuesday_close: data.tuesday_close,
+      wednesday_open: data.wednesday_open,
+      wednesday_close: data.wednesday_close,
+      thursday_open: data.thursday_open,
+      thursday_close: data.thursday_close,
+      friday_open: data.friday_open,
+      friday_close: data.friday_close,
+      saturday_open: data.saturday_open,
+      saturday_close: data.saturday_close,
     } as any);
 
     // .save() will INSERT a new restaurant or UPDATE an existing one based on the ID.

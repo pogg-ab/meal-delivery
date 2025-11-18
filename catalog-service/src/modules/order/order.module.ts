@@ -17,19 +17,35 @@ import { OrdersPickupService } from './order-pickup.service';
 import { PromoCode } from 'src/entities/promo-code.entity';
 import { PromoCodeService } from '../promos/promo.service';
 import { MenuPersonalizationService } from '../menu-personalization/menu-personalization.service';
-
+import { ScheduledJob } from 'src/entities/scheduled-job.entity'; // <-- ADD THIS IMPORT
+import { OrderSchedulerService } from './order-scheduler.service'; // <-- ADD THIS IMPORT
 
 @Module({
-imports: [TypeOrmModule.forFeature([Order, OrderItem, OrderPickup, OrderEvent, MenuItem, Inventory, InventoryLog, Restaurant, PromoCode, CustomerMenuRanking])],
-providers: [
-    OrdersService, 
-    OrdersPickupService, 
-    OrderGateway, 
-    KafkaProvider, 
+  imports: [
+    TypeOrmModule.forFeature([
+      Order,
+      OrderItem,
+      OrderPickup,
+      OrderEvent,
+      MenuItem,
+      Inventory,
+      InventoryLog,
+      Restaurant,
+      PromoCode,
+      CustomerMenuRanking,
+      ScheduledJob, // <-- ADD THE NEW ENTITY HERE
+    ]),
+  ],
+  providers: [
+    OrdersService,
+    OrdersPickupService,
+    OrderGateway,
+    KafkaProvider,
     PromoCodeService,
-    MenuPersonalizationService 
-],
-controllers: [OrdersController],
-exports: [OrdersService],
+    MenuPersonalizationService,
+    OrderSchedulerService, // <-- ADD THE NEW SERVICE HERE
+  ],
+  controllers: [OrdersController],
+  exports: [OrdersService],
 })
 export class OrdersModule {}

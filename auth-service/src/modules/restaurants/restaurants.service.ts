@@ -91,42 +91,47 @@ export class RestaurantsService {
         return fullRestaurant;
     }
 
-  async addDocument(
-  ownerId: string,
-  restaurantId: string,
-  uploadDto: UploadDocumentDto,
-  file: Express.Multer.File,
-): Promise<RestaurantDocument> {
-  const restaurant = await this.restaurantRepository.findOneBy({ id: restaurantId });
+ async addDocument(
+        ownerId: string,
+        restaurantId: string,
+        uploadDto: UploadDocumentDto,
+        file: Express.Multer.File,
+    ): Promise<{ url: string }> { // <-- 1. Change the return type
+        const restaurant = await this.restaurantRepository.findOneBy({ id: restaurantId });
 
-  if (!restaurant) { throw new NotFoundException(`Restaurant with ID "${restaurantId}" not found.`); }
-  if (restaurant.owner_id !== ownerId) { throw new UnauthorizedException('You are not the owner of this restaurant.'); }
+        if (!restaurant) { throw new NotFoundException(`Restaurant with ID "${restaurantId}" not found.`); }
+        if (restaurant.owner_id !== ownerId) { throw new UnauthorizedException('You are not the owner of this restaurant.'); }
 
-  const filename = `${uuidv4()}${path.extname(file.originalname)}`;
-  const uploadPath = './uploads/documents';
-  const filePath = path.join(uploadPath, filename);
+        // --- This part remains exactly the same ---
+        const filename = `${uuidv4()}${path.extname(file.originalname)}`;
+        const uploadPath = './uploads/documents';
+        const filePath = path.join(uploadPath, filename);
 
-  if (!fs.existsSync(uploadPath)) {
-    fs.mkdirSync(uploadPath, { recursive: true });
-  }
+        if (!fs.existsSync(uploadPath)) {
+            fs.mkdirSync(uploadPath, { recursive: true });
+        }
 
-  fs.writeFileSync(filePath, file.buffer);
+        fs.writeFileSync(filePath, file.buffer);
 
-  const newDocument = this.documentRepository.create({
-    restaurant_id: restaurantId,
-    document_type: uploadDto.document_type,
-    // --- THIS IS THE FIX ---
-    document_url: filePath, // We now store the correct, full relative path
-    original_name: file.originalname,
-    mimetype: file.mimetype,
-  });
-  const savedDocument = await this.documentRepository.save(newDocument);
+        const newDocument = this.documentRepository.create({
+            restaurant_id: restaurantId,
+            document_type: uploadDto.document_type,
+            document_url: filePath, // We still store the local path for our server to find the file
+            original_name: file.originalname,
+            mimetype: file.mimetype,
+        });
+        await this.documentRepository.save(newDocument);
 
-  restaurant.status = RestaurantStatus.UNDER_REVIEW;
-  await this.restaurantRepository.save(restaurant);
-  
-  return savedDocument;
-}
+        restaurant.status = RestaurantStatus.UNDER_REVIEW;
+        await this.restaurantRepository.save(restaurant);
+        // --- End of unchanged part ---
+
+        // --- 2. Construct and return the full API URL ---
+        const documentUrl = `${process.env.API_BASE_URL}/restaurants/${restaurantId}/documents/${uploadDto.document_type}`;
+
+        return { url: documentUrl };
+    }
+
 async updateStatus(
   restaurantId: string,
   updateStatusDto: UpdateRestaurantStatusDto,
@@ -135,27 +140,25 @@ async updateStatus(
   return this.entityManager.transaction(async (transactionalEntityManager) => {
     const restaurantRepo = transactionalEntityManager.getRepository(Restaurant);
     
-    // --- MODIFIED ---
-    // We now also load the 'addresses' relation to include it in the Kafka event.
+    // --- STEP 1: MODIFY RELATION LOADING ---
+    // We now also load 'hours' to include in the Kafka event.
     const restaurant = await restaurantRepo.findOne({
       where: { id: restaurantId },
-      relations: ['owner', 'addresses'], 
+      // Load all necessary relations for the Kafka event in one go
+      relations: ['owner', 'addresses', 'hours'], 
     });
 
     if (!restaurant) {
       throw new NotFoundException(`Restaurant with ID "${restaurantId}" not found.`);
     }
 
-    // Capture the state before and after the change
     const previousStatus = restaurant.status;
     const newStatus = updateStatusDto.status as unknown as RestaurantStatus;
 
-    // If the status isn't changing, no need to do anything
     if (previousStatus === newStatus) {
         return restaurant;
     }
 
-    // --- Your original validation logic ---
     if (newStatus === RestaurantStatus.REJECTED && !updateStatusDto.rejection_reason) {
       throw new BadRequestException('Rejection reason is required when rejecting a restaurant.');
     }
@@ -165,64 +168,82 @@ async updateStatus(
       throw new NotFoundException(`Owner for restaurant ${restaurantId} not found.`);
     }
     
-    // --- Your original role-finding logic ---
     const allRoles = await this.rolesService.findAll();
     const ownerRole = allRoles.find(role => role.name === 'restaurant_owner');
 
     if (!ownerRole) {
       throw new NotFoundException('"restaurant_owner" role not found. Please seed the database.');
     }
-
-    // --- NEW CORE BUSINESS LOGIC FOR ROLE MANAGEMENT ---
     
-    // 1. If the new status is APPROVED, assign the role.
     if (newStatus === RestaurantStatus.APPROVED) {
       await this.usersService.assignRole(
-        owner.user_id, // Use owner's ID from the relation
+        owner.user_id,
         { roleId: ownerRole.role_id }, 
-        transactionalEntityManager // Pass the transaction manager for safety
+        transactionalEntityManager
       );
     } 
-    // 2. If it was previously APPROVED and is now being REJECTED, remove the role.
     else if (newStatus === RestaurantStatus.REJECTED && previousStatus === RestaurantStatus.APPROVED) {
       await this.usersService.removeRole(
         owner.user_id,
         { roleId: ownerRole.role_id },
-        transactionalEntityManager // Pass the transaction manager for safety
+        transactionalEntityManager
       );
     }
     
-    // --- Your original restaurant update logic ---
     restaurant.status = newStatus;
     restaurant.is_active = (newStatus === RestaurantStatus.APPROVED);
     restaurant.rejection_reason = updateStatusDto.rejection_reason || '';
     
-    // Save the updated restaurant within the transaction
     const updatedRestaurant = await restaurantRepo.save(restaurant);
 
-    // --- Your original Kafka & Mailer logic (side-effects) ---
+    // --- Side-effects (Kafka & Mailer) ---
     if (newStatus === RestaurantStatus.APPROVED) {
-        // --- MODIFIED ---
-        // Prepare the address payload for the Kafka event.
+        
+        // Prepare the address payload (your existing logic)
         const primaryAddress = restaurant.addresses && restaurant.addresses.length > 0 
             ? restaurant.addresses[0] 
             : null;
 
-        // The Kafka event now includes the description and full address details.
+        // --- STEP 2: FLATTEN THE OPERATING HOURS ---
+        const flattenedHours = {
+            sunday_open: null, sunday_close: null,
+            monday_open: null, monday_close: null,
+            tuesday_open: null, tuesday_close: null,
+            wednesday_open: null, wednesday_close: null,
+            thursday_open: null, thursday_close: null,
+            friday_open: null, friday_close: null,
+            saturday_open: null, saturday_close: null,
+        };
+
+        const dayMap = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+        
+        // Use the 'hours' relation we loaded earlier
+        for (const hour of restaurant.hours) {
+            const dayName = dayMap[hour.weekday];
+            if (dayName && !hour.is_closed) {
+                flattenedHours[`${dayName}_open`] = hour.open_time;
+                flattenedHours[`${dayName}_close`] = hour.close_time;
+            }
+        }
+        // --- END OF STEP 2 ---
+
+        // --- STEP 3: EMIT THE ENHANCED KAFKA EVENT ---
         this.kafkaProvider.emit('restaurant.approved', {
+            // Your existing fields
             id: restaurant.id,
             name: restaurant.name,
             description: restaurant.description,
             owner_id: restaurant.owner_id,
             is_active: restaurant.is_active,
-            address: primaryAddress ? {
-                street: primaryAddress.street,
-                city: primaryAddress.city,
-                region: primaryAddress.region,
-                country: primaryAddress.country,
-                latitude: primaryAddress.latitude,
-                longitude: primaryAddress.longitude,
-            } : null,
+            // Your existing address logic
+            street: primaryAddress?.street,
+            city: primaryAddress?.city,
+            region: primaryAddress?.region,
+            country: primaryAddress?.country,
+            latitude: primaryAddress?.latitude,
+            longitude: primaryAddress?.longitude,
+            // Spread the new flattened hours object into the payload
+            ...flattenedHours,
         });
 
         try {
