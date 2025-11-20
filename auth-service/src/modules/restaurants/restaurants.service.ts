@@ -228,24 +228,26 @@ async updateStatus(
         // --- END OF STEP 2 ---
 
         // --- STEP 3: EMIT THE ENHANCED KAFKA EVENT ---
-        this.kafkaProvider.emit('restaurant.approved', {
-            // Your existing fields
-            id: restaurant.id,
-            name: restaurant.name,
-            description: restaurant.description,
-            owner_id: restaurant.owner_id,
-            is_active: restaurant.is_active,
-            // Your existing address logic
-            street: primaryAddress?.street,
-            city: primaryAddress?.city,
-            region: primaryAddress?.region,
-            country: primaryAddress?.country,
-            latitude: primaryAddress?.latitude,
-            longitude: primaryAddress?.longitude,
-            // Spread the new flattened hours object into the payload
-            ...flattenedHours,
-        });
+       this.kafkaProvider.emit('restaurant.approved', {
+    // Top-level fields remain the same
+    id: restaurant.id,
+    name: restaurant.name,
+    description: restaurant.description,
+    owner_id: restaurant.owner_id,
+    is_active: restaurant.is_active,
 
+    // THE FIX: We create the nested 'address' object that your consumer expects.
+    address: primaryAddress ? {
+        street: primaryAddress.street,
+        city: primaryAddress.city,
+        region: primaryAddress.region,
+        country: primaryAddress.country,
+        latitude: primaryAddress.latitude,
+        longitude: primaryAddress.longitude,
+    } : null,
+
+    ...flattenedHours,
+});
         try {
             await this.mailerProvider.sendMail(
                 restaurant.email, 
