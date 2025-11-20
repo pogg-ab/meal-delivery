@@ -19,6 +19,7 @@ import { PromoCodeService } from '../promos/promo.service';
 import { MenuPersonalizationService } from '../menu-personalization/menu-personalization.service';
 import { ScheduledJob } from 'src/entities/scheduled-job.entity'; // <-- ADD THIS IMPORT
 import { OrderSchedulerService } from './order-scheduler.service'; // <-- ADD THIS IMPORT
+import { RewardsModule } from '../rewards/rewards.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { OrderSchedulerService } from './order-scheduler.service'; // <-- ADD TH
       CustomerMenuRanking,
       ScheduledJob, // <-- ADD THE NEW ENTITY HERE
     ]),
+    RewardsModule,
   ],
   providers: [
     OrdersService,

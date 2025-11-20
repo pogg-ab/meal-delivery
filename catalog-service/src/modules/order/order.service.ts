@@ -21,6 +21,9 @@ import { OwnerPreparingDto } from './dtos/owner-preparing.dto';
 import { ScheduleOrderDto } from './dtos/schedule-order.dto';
 import { ScheduledJob } from '../../entities/scheduled-job.entity';
 import { ScheduledJobStatus } from '../../entities/scheduled-job.entity';
+import { RewardsService } from '../rewards/rewards.service';
+import { RewardType } from 'src/entities/enums/reward-type.enum';
+import { RewardPointsLedger } from 'src/entities/reward-points-ledger.entity';
 const dateFnsTz = require('date-fns-tz');
 
 @Injectable()
@@ -39,6 +42,7 @@ export class OrdersService {
     private readonly pickupService: OrdersPickupService,
     private readonly promoCodeService: PromoCodeService,
     private readonly menuPersonalizationService: MenuPersonalizationService,
+    private readonly rewardsService: RewardsService,
   ) {}
 
 
@@ -221,7 +225,9 @@ async cancelScheduledOrder(customerId: string, orderId: string): Promise<Order> 
     return savedOrder;
   });
 }
-  async createOrder(
+
+
+async createOrder(
     customerId: string,
     username: string,
     phone: string,
@@ -233,17 +239,19 @@ async cancelScheduledOrder(customerId: string, orderId: string): Promise<Order> 
     }
 
     return await this.dataSource.transaction(async (manager) => {
+      // Get repositories from the transaction manager
       const orderRepo = manager.getRepository(Order);
       const orderItemRepo = manager.getRepository(OrderItem);
       const menuRepo = manager.getRepository(MenuItem);
       const orderEventRepo = manager.getRepository(OrderEvent);
       const restaurantRepo = manager.getRepository(Restaurant);
+      const ledgerRepo = manager.getRepository(RewardPointsLedger);
 
       const restaurant = await restaurantRepo.findOne({ where: { id: dto.restaurant_id } });
       if (!restaurant) throw new NotFoundException(`Restaurant with ID ${dto.restaurant_id} not found.`);
       const ownerId = restaurant.owner_id;
 
-      // compute gross
+      // Compute gross (Original logic - no changes)
       let gross = 0;
       const preparedItems = [] as any[];
       for (const it of dto.items) {
@@ -264,29 +272,45 @@ async cancelScheduledOrder(customerId: string, orderId: string): Promise<Order> 
         });
       }
 
-      // Apply promo inside same transaction
+      // --- Calculate points discount separately ---
+      let discountFromPoints = 0;
+      // --- FIX: Assign to a local constant to help TypeScript with type narrowing ---
+      const pointsToRedeem = dto.points_to_redeem;
+      if (pointsToRedeem && pointsToRedeem > 0) {
+        discountFromPoints = await this.rewardsService.processRedemption(
+          customerId,
+          pointsToRedeem, // <-- FIX: Use the new constant here
+          gross,
+          manager,
+        );
+      }
+
+      // --- Original Promo Logic is UNTOUCHED ---
       const platformFeeRate = Number(process.env.PLATFORM_FEE_RATE ?? 0.05);
       const promoResult = await this.promoCodeService.applyPromo(manager, promoCode, gross, dto.restaurant_id, platformFeeRate);
+      
+      const finalCustomerPays = promoResult.customer_pays - discountFromPoints;
+      const totalDiscountAmount = promoResult.discount_amount + discountFromPoints;
 
-      const customerPays = promoResult.customer_pays;
-      const discount_amount = promoResult.discount_amount;
       const discount_breakdown = {
-        discount_amount,
+        discount_amount: promoResult.discount_amount,
         restaurant_discount: promoResult.restaurant_discount,
         platform_discount: promoResult.platform_discount,
         platform_topup_needed: promoResult.platform_topup_needed,
         promo: promoResult.promo,
+        points_redeemed: pointsToRedeem ?? 0,
+        points_discount: discountFromPoints,
       };
 
-      // Create order
+      // Create order with the final calculated values
       const orderData: DeepPartial<Order> = {
         customer_id: customerId,
         customer_name: username,
         customer_phone: phone,
         restaurant_id: dto.restaurant_id,
-        total_amount: customerPays,
+        total_amount: finalCustomerPays,
         gross_amount: promoResult.gross,
-        discount_amount: discount_amount,
+        discount_amount: totalDiscountAmount,
         discount_breakdown,
         promo_code: promoResult.promo?.code ?? null,
         currency: dto.currency ?? 'USD',
@@ -298,7 +322,19 @@ async cancelScheduledOrder(customerId: string, orderId: string): Promise<Order> 
       const orderEntity = orderRepo.create(orderData);
       const savedOrder = await orderRepo.save(orderEntity);
 
-      // order items
+      // --- Create the ledger entry for the redemption ---
+      if (discountFromPoints > 0 && pointsToRedeem) {
+        const ledgerEntry = ledgerRepo.create({
+          customer_id: customerId,
+          order_id: savedOrder.id,
+          points: -Math.abs(pointsToRedeem),
+          type: RewardType.REDEEMED,
+          description: `Redeemed for order #${savedOrder.id.split('-')[0]}`,
+        });
+        await ledgerRepo.save(ledgerEntry);
+      }
+
+      // Save order items (Original logic - no changes)
       for (const p of preparedItems) {
         const itemEntity = orderItemRepo.create({
           order_id: savedOrder.id,
@@ -312,7 +348,7 @@ async cancelScheduledOrder(customerId: string, orderId: string): Promise<Order> 
         await orderItemRepo.save(itemEntity);
       }
 
-      // order event
+      // Save order event with the extended metadata
       await orderEventRepo.save(
         orderEventRepo.create({
           order_id: savedOrder.id,
@@ -323,18 +359,17 @@ async cancelScheduledOrder(customerId: string, orderId: string): Promise<Order> 
             promo: promoResult.promo ?? null,
             discount: discount_breakdown,
             gross: promoResult.gross,
-            customer_pays: promoResult.customer_pays,
+            customer_pays: finalCustomerPays,
           },
         } as DeepPartial<OrderEvent>),
       );
 
+      // (The rest of the function remains identical to your original)
       const fullOrder = await orderRepo.findOne({ where: { id: savedOrder.id }, relations: ['items', 'restaurant'] });
       if (!fullOrder) throw new NotFoundException('Order not found after creation');
 
-      // websocket notify
       (this as any).gateway?.emitOrderCreated?.(fullOrder);
 
-      // emit order.created for payment & other consumers
       try {
         const eventPayload = {
           order: {
@@ -350,7 +385,7 @@ async cancelScheduledOrder(customerId: string, orderId: string): Promise<Order> 
               subtotal: Number(i.subtotal),
             })),
             gross_amount: promoResult.gross,
-            amount: promoResult.customer_pays,
+            amount: finalCustomerPays,
             currency: fullOrder.currency,
             promo: promoResult.promo ?? null,
             discount: discount_breakdown,
@@ -369,13 +404,12 @@ async cancelScheduledOrder(customerId: string, orderId: string): Promise<Order> 
       try {
         await this.menuPersonalizationService.trackOrderItemsForPersonalization(fullOrder);
       } catch (e) {
-       // don't fail order creation for personalization errors
          this.logger?.warn?.('Failed to update personalization for order ' + fullOrder.id, e as any);
         }
       
       return fullOrder;
     });
-  }
+}
  
 
   
@@ -1009,8 +1043,12 @@ async getScheduledOrdersForRestaurant(ownerId: string, restaurantId: string, lim
    * Restaurant owner marks an order as completed (i.e., picked up).
    * The order must be in the READY state.
    */
-  async markAsComplete(ownerId: string, orderId: string): Promise<{ ok: boolean }> {
-    return await this.dataSource.transaction(async (manager) => {
+  // In src/modules/order/order.service.ts
+
+async markAsComplete(ownerId: string, orderId: string): Promise<{ ok: boolean }> {
+    // The transaction will return the completed order, which we assign to this constant.
+    // This solves the "used before assigned" error in a clean, immutable way.
+    const committedOrder = await this.dataSource.transaction(async (manager) => {
       const orderRepo = manager.getRepository(Order);
       const eventRepo = manager.getRepository(OrderEvent);
 
@@ -1023,36 +1061,47 @@ async getScheduledOrdersForRestaurant(ownerId: string, restaurantId: string, lim
       }
 
       // State machine validation: Must be in READY state
-      if (order.status !== OrderStatus.READY) { // <-- ADJUSTED TO YOUR ENUM
+      if (order.status !== OrderStatus.READY) {
         throw new BadRequestException(`Order cannot be marked as complete. Current status: ${order.status}`);
       }
 
-      order.status = OrderStatus.COMPLETED; // <-- ADJUSTED TO YOUR ENUM
-      await orderRepo.save(order);
+      order.status = OrderStatus.COMPLETED;
+      const savedOrder = await orderRepo.save(order);
 
       await eventRepo.save(
         eventRepo.create({
-          order_id: order.id,
+          order_id: savedOrder.id,
           actor_id: ownerId,
-          action: 'ORDER_COMPLETED', // <-- ADJUSTED ACTION NAME
+          action: 'ORDER_COMPLETED',
         } as DeepPartial<OrderEvent>),
       );
 
-      return order;
-    }).then(async (committedOrder) => {
-      this.gateway.emitOrderUpdated(committedOrder);
-      try {
-        await this.kafka.emit('order.completed', { // <-- ADJUSTED EVENT NAME
-          order_id: committedOrder.id,
-          restaurant_id: committedOrder.restaurant_id,
-          customer_id: committedOrder.customer_id,
-          completed_at: new Date().toISOString(),
-        });
-      } catch (e) {
-        this.logger.warn('Kafka emit failed for order.completed', e as any);
-      }
-      return { ok: true };
+      // --- REWARDS INTEGRATION ---
+      await this.rewardsService.addPointsForCompletedOrder(savedOrder, manager);
+
+      // --- RETURN THE FINAL ORDER FROM THE TRANSACTION ---
+      // This value will be the result of the `await this.dataSource.transaction(...)` call.
+      return savedOrder;
     });
+
+    // The code below only runs if the transaction was successful and returned a valid order.
+    // The `committedOrder` constant is now guaranteed to be assigned.
+    
+    // Perform side-effects like WebSocket and Kafka emissions AFTER the transaction is committed.
+    this.gateway.emitOrderUpdated(committedOrder);
+    try {
+      await this.kafka.emit('order.completed', {
+        order_id: committedOrder.id,
+        restaurant_id: committedOrder.restaurant_id,
+        customer_id: committedOrder.customer_id,
+        total_amount: committedOrder.total_amount,
+        completed_at: new Date().toISOString(),
+      });
+    } catch (e) {
+      this.logger.warn('Kafka emit failed for order.completed', e as any);
+    }
+    
+    return { ok: true };
   }
 
 

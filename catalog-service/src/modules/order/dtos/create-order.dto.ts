@@ -1,7 +1,7 @@
 
 // src/modules/orders/dtos/create-order.dto.ts 
 import { ApiProperty } from '@nestjs/swagger';
-import { IsArray, ValidateNested, IsUUID, IsNumber, IsOptional, Min, IsString } from 'class-validator';
+import { IsArray, ValidateNested, IsUUID, IsNumber, IsOptional, Min, IsString, IsInt } from 'class-validator';
 import { Type } from 'class-transformer';
 
 
@@ -56,4 +56,14 @@ is_delivery?: boolean;
 @IsOptional()
 @IsString()
 promo_code?: string;
+
+@ApiProperty({
+    required: false,
+    description: 'Number of reward points the customer wishes to redeem for a discount.',
+    example: 100,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1, { message: 'Points to redeem must be a positive number.' })
+  points_to_redeem?: number;
 }
