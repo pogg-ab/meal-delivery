@@ -1,4 +1,4 @@
-// in catalog-service/src/entities/restaurant.entity.ts
+// PASTE THIS ENTIRE BLOCK INTO: catalog-service/src/entities/restaurant.entity.ts
 
 import { Entity, PrimaryColumn, Column, OneToMany } from 'typeorm';
 import { MenuCategory } from './menu-category.entity';
@@ -55,8 +55,18 @@ export class Restaurant {
   @Column({ default: false })
   is_active: boolean;
 
-  // --- ADD THESE NEW COLUMNS FOR OPERATING HOURS ---
+  // --- MERGE RESOLUTION: KEPT BOTH SETS OF CHANGES ---
 
+  // *** START: Friend's changes for Reviews & Ratings ***
+  @Column({ type: 'decimal', precision: 3, scale: 2, nullable: true })
+  average_rating: number | null;
+
+  @Column({ type: 'integer', default: 0 })
+  total_reviews: number;
+  // *** END: Friend's changes for Reviews & Ratings ***
+
+
+  // *** START: Your changes for Operating Hours ***
   @Column({ type: 'time', nullable: true, comment: "Sunday opening time" })
   sunday_open: string;
 
@@ -98,8 +108,7 @@ export class Restaurant {
 
   @Column({ type: 'time', nullable: true, comment: "Saturday closing time" })
   saturday_close: string;
-  
-  // --- END OF NEW COLUMNS ---
+  // *** END: Your changes for Operating Hours ***
 
   @OneToMany(() => MenuCategory, (category) => category.restaurant)
   menu_categories: MenuCategory[];

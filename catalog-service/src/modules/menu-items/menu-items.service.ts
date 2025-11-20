@@ -77,6 +77,8 @@ export class MenuItemsService {
       'menuItem.description', // <-- 1. Select the description
       'menuItem.price',
       'menuItem.is_available',
+      'menuItem.average_rating',
+      'menuItem.total_reviews',
       'category.id',
       'category.name',
     ])
@@ -88,6 +90,8 @@ export class MenuItemsService {
     description: item.description, // <-- 2. Map the description
     price: item.price.toString(),
     is_available: item.is_available,
+    average_rating: item.average_rating,
+    total_reviews: item.total_reviews,
     categoryId: item.category.id,
     categoryName: item.category.name,
   }));
@@ -95,6 +99,8 @@ export class MenuItemsService {
   return {
     restaurantId: restaurant.id,
     restaurantName: restaurant.name,
+    restaurantRating: restaurant.average_rating,
+    restaurantTotalReviews: restaurant.total_reviews,
     menuItems: formattedMenuItems,
   };
 }

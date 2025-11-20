@@ -28,6 +28,12 @@ export class MenuItem {
   @Column({ type: 'text', nullable: true })
   image_url: string;
 
+  @Column({ type: 'decimal', precision: 3, scale: 2, nullable: true })
+  average_rating: number | null;
+
+  @Column({ type: 'integer', default: 0 })
+  total_reviews: number;
+
   @CreateDateColumn()
   created_at: Date;
 

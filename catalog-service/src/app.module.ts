@@ -1,11 +1,11 @@
-// in catalog-service/src/app.module.ts
+// PASTE THIS ENTIRE BLOCK INTO: catalog-service/src/app.module.ts
 
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
 import { CacheModule } from '@nestjs/cache-manager';
-import { redisStore } from 'cache-manager-redis-yet'; // The new, correct library
+import { redisStore } from 'cache-manager-redis-yet';
 
 import { OrdersModule } from './modules/order/order.module';
 import { KafkaProvider } from './providers/kafka.provider';
@@ -18,7 +18,10 @@ import { InventoryModule } from './modules/inventory/inventory.module';
 import { SearchModule } from './modules/search/search.module';
 import { PromosModule } from './modules/promos/promo.module';
 import { MenuPersonalizationModule } from './modules/menu-personalization/menu-personalization.module';
+
+// --- MERGE RESOLUTION: KEPT BOTH IMPORTS ---
 import { RewardsModule } from './modules/rewards/rewards.module';
+import { ReviewsModule } from './modules/reviews/reviews.module';
 
 @Module({
   imports: [
@@ -44,7 +47,6 @@ import { RewardsModule } from './modules/rewards/rewards.module';
       },
     }),
    
-
    TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -66,11 +68,11 @@ import { RewardsModule } from './modules/rewards/rewards.module';
 
         return {
           type: 'postgres',
-          host: host, // Use the variable we just logged
-          port: port, // Use the variable we just logged
-          username: username, // Use the variable we just logged
+          host: host,
+          port: port,
+          username: username,
           password: cfg.get('POSTGRES_PASSWORD'),
-          database: database, // Use the variable we just logged
+          database: database,
           entities: [__dirname + '/**/*.entity{.ts,.js}'],
           synchronize: false,
           migrationsRun: true,
@@ -89,7 +91,9 @@ import { RewardsModule } from './modules/rewards/rewards.module';
      SearchModule, 
      PromosModule,
      MenuPersonalizationModule,
+     // --- MERGE RESOLUTION: KEPT BOTH MODULES ---
      RewardsModule,
+     ReviewsModule
   ],
   providers: [KafkaProvider],
   exports: [KafkaProvider],
