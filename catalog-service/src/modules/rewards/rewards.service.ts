@@ -41,7 +41,9 @@ export class RewardsService {
   // =================== CORE LOGIC (DYNAMIC RULES) ================== //
   // ================================================================= //
 
-  async addPointsForCompletedOrder(order: Order, manager: EntityManager): Promise<void> {
+  // In src/modules/rewards/rewards.service.ts
+
+async addPointsForCompletedOrder(order: Order, manager: EntityManager): Promise<void> {
     const earningRule = await this.getActiveRule(RuleType.EARNING);
 
     if (!earningRule) {
@@ -49,8 +51,14 @@ export class RewardsService {
       return;
     }
 
-    // Use the dynamic conversion rate from the database rule
-    // e.g., total_amount (100) * conversion_rate (0.1) = 10 points
+  
+    if (earningRule.min_order_value > 0 && Number(order.total_amount) < earningRule.min_order_value) {
+      this.logger.log(
+        `Order ${order.id} total (${order.total_amount}) is below the minimum required value (${earningRule.min_order_value}). Skipping point award.`
+      );
+      return; 
+    }
+    
     const pointsToAdd = Math.floor(Number(order.total_amount) * Number(earningRule.conversion_rate));
 
     if (pointsToAdd <= 0) {
@@ -79,9 +87,9 @@ export class RewardsService {
     await ledgerRepo.save(ledgerEntry);
 
     this.logger.log(`Awarded ${pointsToAdd} points to customer ${order.customer_id} for order ${order.id}`);
-  }
+}
 
-  async processRedemption(
+async processRedemption(
     customerId: string,
     pointsToRedeem: number,
     orderTotal: number,
@@ -101,10 +109,20 @@ export class RewardsService {
       throw new BadRequestException('Point redemption is temporarily unavailable.');
     }
 
-    // Use the dynamic conversion rate from the database rule
-    // e.g., pointsToRedeem (100) * conversion_rate (0.1) = 10 currency discount
+   
     const potentialDiscount = pointsToRedeem * Number(redemptionRule.conversion_rate);
-    const actualDiscount = Math.min(potentialDiscount, orderTotal);
+
+    
+    const maxAllowedDiscount = orderTotal * (redemptionRule.max_redeem_percentage / 100);
+
+    this.logger.debug(
+      `Redemption check for customer ${customerId}: OrderTotal=${orderTotal}, PotentialDiscount=${potentialDiscount}, MaxAllowedDiscount=${maxAllowedDiscount}`
+    );
+
+  
+    const actualDiscount = Math.min(potentialDiscount, maxAllowedDiscount, orderTotal);
+
+    
 
     balance.total_points -= pointsToRedeem;
     await balanceRepo.save(balance);
@@ -113,7 +131,6 @@ export class RewardsService {
 
     return actualDiscount;
   }
-
   // ================================================================= //
   // ================= CUSTOMER-FACING ENDPOINTS ===================== //
   // ================================================================= //
@@ -239,5 +256,96 @@ export class RewardsService {
     }
     
     return rule;
+  }
+
+  // ================================================================= //
+  // ================= NEW CUSTOMER-FACING METHOD ==================== //
+  // ================================================================= //
+
+  async getActivePublicRules(): Promise<RewardRule[]> {
+    const now = new Date();
+    // Intentionally find all active rules, not just one.
+    return this.ruleRepo.createQueryBuilder('rule')
+      .where('rule.is_active = :isActive', { isActive: true })
+      .andWhere('(rule.start_date IS NULL OR rule.start_date <= :now)', { now })
+      .andWhere('(rule.end_date IS NULL OR rule.end_date >= :now)', { now })
+      .orderBy('rule.created_at', 'DESC')
+      .getMany();
+  }
+
+
+  // ================================================================= //
+  // ================== NEW ADMIN-FACING METHODS ===================== //
+  // ================================================================= //
+
+  async getUsersWithBalances(pagination: PaginationQueryDto): Promise<RewardPointsBalance[]> {
+    const { limit, offset } = pagination;
+    // Note: This returns customer_id. A future enhancement could join with a user table
+    // if user data were available in this service.
+    return this.balanceRepo.find({
+      order: { total_points: 'DESC' },
+      take: limit,
+      skip: offset,
+    });
+  }
+
+  async getTopEarners(limit = 10): Promise<RewardPointsBalance[]> {
+    return this.balanceRepo.find({
+      order: { total_points: 'DESC' },
+      take: Math.min(limit, 50), // Cap limit to 50 for performance
+    });
+  }
+
+  async calculateTotalLiabilities(): Promise<{ total_outstanding_points: number }> {
+    const result = await this.balanceRepo
+      .createQueryBuilder('balance')
+      .select('SUM(balance.total_points)', 'totalPoints')
+      .getRawOne();
+
+    return { total_outstanding_points: parseInt(result.totalPoints, 10) || 0 };
+  }
+  
+  async getMonthlyActivity(): Promise<any[]> {
+    // This query uses raw SQL functions for powerful aggregation.
+    const results = await this.ledgerRepo
+      .createQueryBuilder('ledger')
+      .select("DATE_TRUNC('month', ledger.created_at)::DATE", 'month')
+      .addSelect("SUM(CASE WHEN ledger.points > 0 THEN ledger.points ELSE 0 END)", 'points_earned')
+      .addSelect("SUM(CASE WHEN ledger.points < 0 THEN ledger.points ELSE 0 END)", 'points_redeemed')
+      .groupBy('month')
+      .orderBy('month', 'DESC')
+      .getRawMany();
+
+    // Clean up the result for the API response
+    return results.map(row => ({
+      month: row.month,
+      points_earned: parseInt(row.points_earned, 10) || 0,
+      points_redeemed: Math.abs(parseInt(row.points_redeemed, 10) || 0), // Return as a positive number
+    }));
+  }
+
+  async deleteRule(id: string): Promise<{ ok: boolean; message: string }> {
+    const rule = await this.findRuleById(id); // Reuse our existing method to find the rule and handle not found errors.
+
+    // Get the type of the rule BEFORE deleting it so we can clear the correct cache key.
+    const ruleType = rule.type;
+
+    const result = await this.ruleRepo.delete({ id });
+
+    if (result.affected === 0) {
+      // This is a safeguard, though findRuleById should have already caught it.
+      throw new NotFoundException(`Reward rule with ID "${id}" not found.`);
+    }
+
+    // --- CRITICAL: Invalidate the cache for this rule type ---
+    const cacheKey = `active_reward_rule_${ruleType}`;
+    await this.cacheManager.del(cacheKey);
+    this.logger.log(`Invalidated cache for rule type: ${ruleType} due to rule deletion.`);
+    // --------------------------------------------------------
+
+    return {
+      ok: true,
+      message: `Successfully deleted rule "${rule.rule_name}" (ID: ${id}).`,
+    };
   }
 }

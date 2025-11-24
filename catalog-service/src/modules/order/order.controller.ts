@@ -60,6 +60,7 @@ export class OrdersController {
     return req.user?.userId;
   }
 
+ 
   private mapOrderToDto(order: Order): OrderResponseDto {
     return plainToInstance(OrderResponseDto, {
       id: order.id,
@@ -73,6 +74,12 @@ export class OrdersController {
       is_delivery: !!order.is_delivery,
       payment_reference: order.payment_reference ?? undefined,
       paid_at: order.paid_at ?? undefined,
+
+      // --- ADD THESE TWO LINES ---
+      isScheduled: order.isScheduled,
+      scheduledDeliveryTime: order.scheduledDeliveryTime,
+      // --- END OF ADDED LINES ---
+
       items: (order.items || []).map(i => ({
         id: i.id,
         order_id: i.order_id,
@@ -95,43 +102,18 @@ export class OrdersController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('access-token')
   @Post()
-  @ApiOperation({ summary: 'Create a new order for customers' })
+  @ApiOperation({ summary: 'Create a new order (can be immediate or scheduled)' }) // <-- Updated summary
   @ApiBody({ type: CreateOrderDto })
   @ApiResponse({ status: 201, description: 'Order created', type: OrderResponseDto })
   async create(@Req() req: any, @Body() dto: CreateOrderDto): Promise<OrderResponseDto> {
     const userId = this.getUserIdFromReq(req);
-    console.log(req.user);
     const username = req.user?.username;
     const phone = req.user?.phone;
-    console.log(username);
-    // const order = await this.ordersService.createOrder(userId, username, phone, dto);
     const order = await this.ordersService.createOrder(userId, username, phone, dto, dto.promo_code);
     return this.mapOrderToDto(order);
   }
 
- // In OrdersController.ts
 
-@UseGuards(JwtAuthGuard)
-@ApiBearerAuth('access-token')
-@Post('schedule')
-@ApiOperation({ summary: 'Schedules an existing PENDING order for a future time' })
-@ApiBody({ type: ScheduleOrderDto }) // Uses our new DTO
-@ApiResponse({ status: 200, description: 'Order successfully scheduled', type: OrderResponseDto })
-@ApiResponse({ status: 400, description: 'Bad Request (e.g., order is not pending)' })
-async scheduleOrder(
-  @Req() req: any,
-  @Body() dto: ScheduleOrderDto,
-): Promise<OrderResponseDto> {
-  const customerId = this.getUserIdFromReq(req);
-  if (!customerId) {
-    throw new UnauthorizedException('User ID could not be determined from token.');
-  }
-  
-  // Call the service method with the new, simpler signature
-  const scheduledOrder = await this.ordersService.scheduleOrder(customerId, dto);
-  
-  return this.mapOrderToDto(scheduledOrder);
-}
 
  @UseGuards(JwtAuthGuard)
 @ApiBearerAuth('access-token')
@@ -160,22 +142,20 @@ async reschedule(
   return this.mapOrderToDto(updatedOrder);
 }
 
-
-  @UseGuards(JwtAuthGuard)
-@ApiBearerAuth('access-token')
-@Delete(':id/schedule')
-@ApiOperation({ summary: 'Customer cancels the schedule for an order, returning it to PENDING' })
-@ApiParam({ name: 'id', description: 'The ID of the SCHEDULED order' })
-@ApiResponse({ status: 200, description: 'Schedule cancelled successfully', type: OrderResponseDto })
-@ApiResponse({ status: 400, description: 'Bad Request (e.g., order is not in a scheduled state)'})
-async cancelSchedule(
-  @Req() req: any,
-  @Param('id', new ParseUUIDPipe()) id: string,
-): Promise<OrderResponseDto> {
-  const customerId = this.getUserIdFromReq(req);
-  const updatedOrder = await this.ordersService.cancelScheduledOrder(customerId, id);
-  return this.mapOrderToDto(updatedOrder);
-}
+@UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @Delete(':id/schedule')
+  @ApiOperation({ summary: 'Customer cancels a future schedule, converting it to an immediate order' })
+  @ApiParam({ name: 'id', description: 'The ID of the scheduled order to unschedule' })
+  @ApiResponse({ status: 200, description: 'Schedule cancelled successfully', type: OrderResponseDto })
+  async unschedule(
+    @Req() req: any,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ): Promise<OrderResponseDto> {
+    const customerId = this.getUserIdFromReq(req);
+    const updatedOrder = await this.ordersService.unscheduleOrder(customerId, id);
+    return this.mapOrderToDto(updatedOrder);
+  }
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('access-token')

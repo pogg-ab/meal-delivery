@@ -7,7 +7,9 @@ import {
   Get, // <-- Add Get
   Patch, // <-- Add Patch
   Param, // <-- Add Param
-  ParseUUIDPipe, // <-- Add ParseUUIDPipe
+  ParseUUIDPipe,
+  Query,
+  Delete, // <-- Add ParseUUIDPipe
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOkResponse, ApiOperation, ApiParam } from '@nestjs/swagger';
 import { RewardsService } from './rewards.service';
@@ -22,6 +24,7 @@ import { Roles } from '../../common/decorator/roles.decorator';
 import { RewardRule } from 'src/entities/reward-rule.entity'; // <-- Add
 import { CreateRewardRuleDto } from './dto/create-reward-rule.dto'; // <-- Add
 import { UpdateRewardRuleDto } from './dto/update-reward-rule.dto'; // <-- Add
+import { PaginationQueryDto } from './dto/pagination-query.dto';
 
 @ApiTags('Admin - Rewards')
 @ApiBearerAuth('access-token') // Use the named scheme we confirmed works
@@ -78,4 +81,50 @@ export class AdminRewardsController {
   ): Promise<RewardRule> {
     return this.rewardsService.updateRule(id, dto);
   }
+
+  @Delete('rules/:id') 
+  @Roles('platform_admin')
+  @ApiOperation({ summary: 'Permanently delete a reward rule.' })
+  @ApiParam({ name: 'id', type: 'string', description: 'The ID of the rule to delete.' })
+  @ApiOkResponse({
+    description: 'Confirms that the rule was successfully deleted.',
+  })
+  async deleteRule(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<{ ok: boolean; message:string }> {
+    return this.rewardsService.deleteRule(id);
+  }
+
+
+  @Get('users')
+  @Roles('platform_admin')
+  @ApiOperation({ summary: 'List all users and their point balances.' })
+  @ApiOkResponse({ type: [RewardPointsBalance] })
+  async listUsersWithBalances(
+    @Query() pagination: PaginationQueryDto
+  ): Promise<RewardPointsBalance[]> {
+    return this.rewardsService.getUsersWithBalances(pagination);
+  }
+
+  @Get('reports/top-earners')
+  @Roles('platform_admin')
+  @ApiOperation({ summary: 'Get the top reward point earners.' })
+  async getTopEarners(@Query('limit') limit?: number): Promise<RewardPointsBalance[]> {
+    return this.rewardsService.getTopEarners(limit);
+  }
+
+  @Get('reports/liabilities')
+  @Roles('platform_admin')
+  @ApiOperation({ summary: 'Calculate the total outstanding points across all customers.' })
+  async getTotalLiabilities(): Promise<{ total_outstanding_points: number }> {
+    return this.rewardsService.calculateTotalLiabilities();
+  }
+
+  @Get('reports/monthly-activity')
+  @Roles('platform_admin')
+  @ApiOperation({ summary: 'Get a monthly breakdown of points earned vs. redeemed.' })
+  async getMonthlyActivity(): Promise<any[]> {
+    return this.rewardsService.getMonthlyActivity();
+  }
+
 }

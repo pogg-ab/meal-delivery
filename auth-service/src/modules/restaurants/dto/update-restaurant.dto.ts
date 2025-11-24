@@ -1,22 +1,7 @@
 // auth-service/src/modules/restaurants/dto/update-restaurant.dto.ts
 
-import { IsString, IsOptional, IsEmail, IsPhoneNumber, ValidateNested } from 'class-validator';
+import { IsString, IsOptional, IsEmail, IsPhoneNumber } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
-
-class BankDetailsDto {
-  @ApiProperty()
-  @IsString()
-  account_name: string;
-
-  @ApiProperty()
-  @IsString()
-  account_number: string;
-
-  @ApiProperty()
-  @IsString()
-  bank_name: string;
-}
 
 export class UpdateRestaurantDto {
   @ApiProperty({ required: false })
@@ -39,9 +24,5 @@ export class UpdateRestaurantDto {
   @IsPhoneNumber('ET')
   phone?: string;
 
-  @ApiProperty({ required: false })
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => BankDetailsDto)
-  bank_details?: BankDetailsDto;
+  // The bank_details property has been REMOVED from this DTO.
 }

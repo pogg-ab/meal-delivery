@@ -38,7 +38,7 @@ export class Order {
   @JoinColumn({ name: 'restaurant_id' })
   restaurant: Restaurant;
 
-  @Column({ type: 'enum', enum: OrderStatus, default: OrderStatus.PENDING })
+  @Column({ type: 'enum', enum: OrderStatus, default: OrderStatus.SCHEDULED }) 
   status: OrderStatus;
 
   @Column({ type: 'enum', enum: PaymentStatus, default: PaymentStatus.NONE })

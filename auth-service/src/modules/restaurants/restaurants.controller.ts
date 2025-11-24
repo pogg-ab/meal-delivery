@@ -34,6 +34,15 @@ import { RestaurantProfileDto } from './dto/restaurant-profile.dto';
 import { Restaurant } from 'src/entities/restaurant.entity';
 import { createReadStream } from 'fs';
 import { join } from 'path';
+import { UpdateHoursDto } from './dto/update-hours.dto';
+import { UpdateAddressDto } from './dto/update-address.dto';
+import { BankDetailsDto } from './dto/bank-details.dto';
+
+interface AuthenticatedUser {
+  userId: string;
+  roles: string[];
+  restaurantId?: string;
+}
 
 @ApiTags('Restaurants')
 @Controller('restaurants')
@@ -150,18 +159,23 @@ updateProfile(
 
   // --- ADD: This is the new endpoint for serving documents securely ---
   @Get(':id/documents/:documentType')
-  @Roles('platform_admin')
+  @Roles('platform_admin', 'restaurant_owner')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @ApiBearerAuth('access-token')
-  @ApiOperation({ summary: 'Get a restaurant verification document (Admin only)' })
+  @ApiOperation({ summary: 'Get a restaurant verification document (Admin or Owner of the restaurant)' })
   async getRestaurantDocument(
     @Param('id') restaurantId: string,
     @Param('documentType') documentType: string,
     @Res({ passthrough: true }) res: Response,
+    @Req() req, // Pass the request to get the user
   ): Promise<StreamableFile> {
+    const user: AuthenticatedUser = req.user; // Extract the user payload
+
+    // Pass the user to the service for fine-grained authorization
     const fileDetails = await this.restaurantsService.getRestaurantDocument(
       restaurantId,
       documentType,
+      user, 
     );
 
     const fileStream = createReadStream(
@@ -170,7 +184,7 @@ updateProfile(
 
     res.set({
       'Content-Type': fileDetails.mimetype,
-      'Content-Disposition': `inline; filename="${fileDetails.originalName}"`, // 'inline' tries to display in browser
+      'Content-Disposition': `inline; filename="${fileDetails.originalName}"`,
     });
 
     return new StreamableFile(fileStream);
@@ -198,6 +212,49 @@ checkStatus(
   getMyRestaurantProfile(@Req() req): Promise<Restaurant> {
     const ownerId = req.user.userId;
     return this.restaurantsService.getRestaurantProfileByOwnerId(ownerId);
+  }
+
+  @Put(':id/address')
+  @Roles('restaurant_owner')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: "Update your restaurant's address (Owner only)" })
+  updateAddress(
+    @Param('id') restaurantId: string,
+    @Body() updateAddressDto: UpdateAddressDto,
+    @Req() req,
+  ) {
+    const ownerId = req.user.userId;
+    return this.restaurantsService.updateAddress(ownerId, restaurantId, updateAddressDto);
+  }
+
+  @Put(':id/hours')
+  @Roles('restaurant_owner')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: "Update your restaurant's weekly hours (Owner only)" })
+  updateHours(
+    @Param('id') restaurantId: string,
+    @Body() updateHoursDto: UpdateHoursDto, // Use the wrapper DTO for validation
+    @Req() req,
+  ) {
+    const ownerId = req.user.userId;
+    // Pass the inner 'hours' array to the service
+    return this.restaurantsService.updateHours(ownerId, restaurantId, updateHoursDto.hours);
+  }
+
+  @Put(':id/bank-details')
+  @Roles('restaurant_owner')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: "Add or update your restaurant's bank details (Owner only)" })
+  updateBankDetails(
+    @Param('id') restaurantId: string,
+    @Body() bankDetailsDto: BankDetailsDto,
+    @Req() req,
+  ) {
+    const ownerId = req.user.userId;
+    return this.restaurantsService.upsertBankDetails(ownerId, restaurantId, bankDetailsDto);
   }
 
 }

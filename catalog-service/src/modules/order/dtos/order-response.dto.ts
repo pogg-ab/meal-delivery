@@ -1,3 +1,5 @@
+// catalog-service/src/orders/dtos/order-response.dto.ts
+
 import { ApiProperty } from '@nestjs/swagger';
 import { OrderItemResponseDto } from './order-item-response.dto';
 
@@ -34,6 +36,19 @@ export class OrderResponseDto {
 
   @ApiProperty({ required: false })
   paid_at?: Date;
+
+  // --- ADDED THIS BLOCK ---
+  @ApiProperty({ description: 'Indicates if the order is scheduled for a future time', example: true, required: false })
+  isScheduled?: boolean;
+
+  @ApiProperty({
+    description: 'The UTC time for the scheduled delivery, if applicable',
+    example: '2025-11-24T12:00:00.000Z',
+    required: false,
+    nullable: true,
+  })
+  scheduledDeliveryTime?: Date | null;
+  // --- END OF ADDED BLOCK ---
 
   @ApiProperty({ type: [OrderItemResponseDto] })
   items: OrderItemResponseDto[];

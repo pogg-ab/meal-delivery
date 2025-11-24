@@ -1,5 +1,5 @@
 
-import { Injectable, ConflictException, NotFoundException, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { Injectable, ConflictException, NotFoundException, UnauthorizedException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectEntityManager, InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, Repository } from 'typeorm';
 import { RegisterRestaurantDto } from './dto/register-restaurant.dto';
@@ -20,6 +20,15 @@ import { UsersService } from '../UserModule/user.service';
 import { RolesService } from '../RolesModule/roles.service';
 import { MailerProvider } from 'src/providers/mailer.provider';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { RestaurantHourDto } from './dto/update-hours.dto';
+import { UpdateAddressDto } from './dto/update-address.dto';
+import { BankDetailsDto } from './dto/bank-details.dto';
+
+interface AuthenticatedUser {
+  userId: string;
+  roles: string[];
+  restaurantId?: string;
+}
 
 
 @Injectable()
@@ -294,41 +303,17 @@ async updateProfile(
     throw new NotFoundException(`Restaurant with ID "${restaurantId}" not found.`);
   }
 
-  // --- CRITICAL AUTHORIZATION CHECK ---
   if (restaurant.owner_id !== ownerId) {
     throw new UnauthorizedException('You do not have permission to edit this restaurant.');
   }
   
-  const { bank_details, ...restDetails } = updateDto;
+  // --- LOGIC SIMPLIFIED ---
+  // We no longer handle bank_details here.
+  Object.assign(restaurant, updateDto);
+  
+  const savedRestaurant = await this.restaurantRepository.save(restaurant);
 
-  // Update bank details if provided
-  if (bank_details) {
-    let existingBankDetail = await this.bankDetailRepository.findOne({ where: { restaurant_id: restaurantId }});
-    if (existingBankDetail) {
-      Object.assign(existingBankDetail, bank_details);
-      await this.bankDetailRepository.save(existingBankDetail);
-    } else {
-      const newBankDetail = this.bankDetailRepository.create({
-        ...bank_details,
-        restaurant_id: restaurantId,
-      });
-      await this.bankDetailRepository.save(newBankDetail);
-    }
-  }
-
-  // Update the other restaurant details
-  Object.assign(restaurant, restDetails);
-  await this.restaurantRepository.save(restaurant);
-
-  // Return the fully updated restaurant with relations
-  const updatedRestaurant = await this.restaurantRepository.findOne({
-    where: { id: restaurantId },
-    relations: ['bank_details'],
-  });
-  if (!updatedRestaurant) {
-    throw new NotFoundException(`Restaurant with id "${restaurantId}" not found after update.`);
-  }
-  return updatedRestaurant;
+  return savedRestaurant;
 }
 async findForReviewByStatus(statuses: string[]): Promise<Restaurant[]> {
       const validStatuses = statuses.filter(s => Object.values(RestaurantStatus).includes(s as RestaurantStatus));
@@ -348,31 +333,44 @@ async findForReviewByStatus(statuses: string[]): Promise<Restaurant[]> {
     }
 
 async getRestaurantDocument(
-        restaurantId: string,
-        documentType: string,
-    ): Promise<{ filePath: string; originalName: string; mimetype: string }> {
-        const document = await this.documentRepository.findOne({
-            where: { restaurant_id: restaurantId, document_type: documentType },
-        });
+            restaurantId: string,
+            documentType: string,
+            user: AuthenticatedUser, // <-- MODIFIED: Accept the user object
+        ): Promise<{ filePath: string; originalName: string; mimetype: string }> {
+            
+            // --- NEW: Authorization Logic Block ---
+            const isAdmin = user.roles.includes('platform_admin');
+            const isOwner = user.roles.includes('restaurant_owner');
 
-        if (!document || !document.document_url) {
-            throw new NotFoundException(`Document of type ${documentType} for restaurant ${restaurantId} not found.`);
+            // Rule: If the user is an owner, they can only access their own restaurant's documents.
+            if (isOwner && !isAdmin && user.restaurantId !== restaurantId) {
+                throw new ForbiddenException('You do not have permission to view documents for this restaurant.');
+            }
+            // --- End of New Logic ---
+
+            const document = await this.documentRepository.findOne({
+                where: { restaurant_id: restaurantId, document_type: documentType },
+            });
+
+            if (!document || !document.document_url) {
+                throw new NotFoundException(`Document of type ${documentType} for restaurant ${restaurantId} not found.`);
+            }
+
+            const filePath = document.document_url;
+            const fullPath = path.join(process.cwd(), filePath);
+            
+            if (!fs.existsSync(fullPath)) {
+                console.error(`File not found on server at path: ${fullPath}`);
+                throw new NotFoundException(`File for document not found on server.`);
+            }
+
+            return {
+                filePath: filePath,
+                originalName: document.original_name || 'document',
+                mimetype: document.mimetype || 'application/octet-stream',
+            };
         }
 
-        const filePath = document.document_url;
-        const fullPath = path.join(process.cwd(), filePath);
-        
-        if (!fs.existsSync(fullPath)) {
-            console.error(`File not found on server at path: ${fullPath}`);
-            throw new NotFoundException(`File for document not found on server.`);
-        }
-
-        return {
-            filePath: filePath,
-            originalName: document.original_name || 'document',
-            mimetype: document.mimetype || 'application/octet-stream',
-        };
-    }
 
 async checkOwnerStatus(ownerId: string, restaurantId: string): Promise<{ status: RestaurantStatus; rejection_reason: string | null }> {
   const restaurant = await this.restaurantRepository.findOneBy({ id: restaurantId });
@@ -410,4 +408,89 @@ async getRestaurantProfileByOwnerId(ownerId: string): Promise<Restaurant> {
         return restaurant;
     }
 
+
+    async updateAddress(
+  ownerId: string,
+  restaurantId: string,
+  addressDto: UpdateAddressDto,
+): Promise<Address> {
+  // First, verify the owner has rights to this restaurant
+  const restaurant = await this.restaurantRepository.findOneBy({ id: restaurantId });
+  if (!restaurant) { throw new NotFoundException(`Restaurant with ID "${restaurantId}" not found.`); }
+  if (restaurant.owner_id !== ownerId) { throw new UnauthorizedException('You do not have permission to edit this restaurant.'); }
+
+  // Find the existing address. We assume one address per restaurant for now.
+  let address = await this.addressRepository.findOne({ where: { restaurant_id: restaurantId }});
+
+  if (address) {
+    // Address exists, update it
+    Object.assign(address, addressDto);
+  } else {
+    // This case is unlikely if registration is done correctly, but we can handle it.
+    address = this.addressRepository.create({
+      ...addressDto,
+      restaurant_id: restaurantId,
+    });
+  }
+  
+  return this.addressRepository.save(address);
+}
+
+async updateHours(
+  ownerId: string,
+  restaurantId: string,
+  hoursDto: RestaurantHourDto[], // The input is an array of hours
+): Promise<RestaurantHour[]> {
+  const restaurant = await this.restaurantRepository.findOneBy({ id: restaurantId });
+  if (!restaurant) { throw new NotFoundException(`Restaurant with ID "${restaurantId}" not found.`); }
+  if (restaurant.owner_id !== ownerId) { throw new UnauthorizedException('You do not have permission to edit this restaurant.'); }
+
+  // This is the "delete-then-insert" strategy, wrapped in a transaction for safety
+  return this.entityManager.transaction(async transactionalEntityManager => {
+    const hourRepo = transactionalEntityManager.getRepository(RestaurantHour);
+
+    // 1. Delete all existing hours for this restaurant
+    await hourRepo.delete({ restaurant_id: restaurantId });
+
+    // 2. Create new hour entities from the DTO
+    const newHours = hoursDto.map(hour => hourRepo.create({
+      ...hour,
+      restaurant_id: restaurantId,
+    }));
+
+    // 3. Save all the new hours in a single operation
+    return hourRepo.save(newHours);
+  });
+}
+
+async upsertBankDetails(
+  ownerId: string,
+  restaurantId: string,
+  bankDetailsDto: BankDetailsDto,
+): Promise<RestaurantBankDetail> {
+  const restaurant = await this.restaurantRepository.findOneBy({ id: restaurantId });
+
+  if (!restaurant) {
+    throw new NotFoundException(`Restaurant with ID "${restaurantId}" not found.`);
+  }
+
+  if (restaurant.owner_id !== ownerId) {
+    throw new UnauthorizedException('You do not have permission to edit this restaurant.');
+  }
+
+  let bankDetail = await this.bankDetailRepository.findOne({ where: { restaurant_id: restaurantId } });
+
+  if (bankDetail) {
+    // Details exist, so update them
+    Object.assign(bankDetail, bankDetailsDto);
+  } else {
+    // Details do not exist, create a new entry
+    bankDetail = this.bankDetailRepository.create({
+      ...bankDetailsDto,
+      restaurant_id: restaurantId,
+    });
+  }
+
+  return this.bankDetailRepository.save(bankDetail);
+}
 }

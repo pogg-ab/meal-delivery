@@ -1,7 +1,7 @@
 
 // src/modules/orders/dtos/create-order.dto.ts 
 import { ApiProperty } from '@nestjs/swagger';
-import { IsArray, ValidateNested, IsUUID, IsNumber, IsOptional, Min, IsString, IsInt } from 'class-validator';
+import { IsArray, ValidateNested, IsUUID, IsNumber, IsOptional, Min, IsString, IsInt, IsDateString } from 'class-validator';
 import { Type } from 'class-transformer';
 
 
@@ -66,4 +66,13 @@ promo_code?: string;
   @IsInt()
   @Min(1, { message: 'Points to redeem must be a positive number.' })
   points_to_redeem?: number;
+
+  @ApiProperty({
+    required: false,
+    description: 'The desired delivery time in ISO 8601 format (e.g., "2024-09-21T18:00:00"). If omitted, the order is treated as immediate.',
+    example: '2024-09-21T18:00:00',
+  })
+  @IsOptional()
+  @IsDateString()
+  scheduledDeliveryTime?: string;
 }

@@ -1,12 +1,13 @@
 // src/modules/rewards/rewards.controller.ts
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOkResponse } from '@nestjs/swagger'; // Ensure ApiBearerAuth is imported
+import { ApiTags, ApiBearerAuth, ApiOkResponse, ApiOperation } from '@nestjs/swagger'; // Ensure ApiBearerAuth is imported
 import { RewardsService } from './rewards.service';
 import { PaginationQueryDto } from './dto/pagination-query.dto';
 import { RewardPointsBalance } from '../../entities/reward-points-balance.entity';
 import { RewardPointsLedger } from '../../entities/reward-points-ledger.entity';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { UserId } from '../../common/decorator/user-id.decorator';
+import { RewardRule } from 'src/entities/reward-rule.entity';
 
 @ApiTags('Rewards')
 @Controller('rewards')
@@ -34,6 +35,15 @@ export class RewardsController {
     @Query() paginationQuery: PaginationQueryDto,
   ): Promise<RewardPointsLedger[]> {
     return this.rewardsService.getLedgerForCustomer(customerId, paginationQuery);
+  }
+@Get('/rules')
+  @ApiOperation({ summary: 'Get all currently active reward rules for customers.' })
+  @ApiOkResponse({
+    description: 'A list of active earning and redemption rules.',
+    type: [RewardRule],
+  })
+  async getActiveRules(): Promise<RewardRule[]> {
+    return this.rewardsService.getActivePublicRules();
   }
 
   

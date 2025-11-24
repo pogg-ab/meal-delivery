@@ -9,38 +9,84 @@ import {
   IsOptional,
   IsBoolean,
   IsDateString,
+  Min,
+  Max,
 } from 'class-validator';
 import { RuleType } from 'src/entities/enums/rule-type.enum';
 
 export class CreateRewardRuleDto {
-  @ApiProperty({ example: 'Standard Earning Rule' })
+  @ApiProperty({
+    description: 'A unique, descriptive name for the rule.',
+    example: 'Standard Earning Rule',
+  })
   @IsString()
   @IsNotEmpty()
   rule_name: string;
 
-  @ApiProperty({ enum: RuleType, example: RuleType.EARNING })
+  @ApiProperty({
+    description: 'The type of the rule, either for earning or redeeming points.',
+    enum: RuleType,
+    example: RuleType.EARNING,
+  })
   @IsEnum(RuleType)
   type: RuleType;
 
   @ApiProperty({
-    description: 'For EARNING: points per currency unit (e.g., 0.1 for 1 point per 10 currency). For REDEMPTION: currency per point (e.g., 0.1 for 1 currency per 10 points).',
+    description: 'For EARNING: points per currency unit. For REDEMPTION: currency per point.',
     example: 0.1,
   })
   @IsNumber()
   @IsPositive()
   conversion_rate: number;
 
-  @ApiProperty({ required: false, default: true })
+  // --- ADD THIS ENTIRE PROPERTY ---
+  @ApiProperty({
+    description: '(Optional) The minimum order total required for an EARNING rule to apply.',
+    example: 25.00,
+    required: false,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  min_order_value?: number;
+  // --------------------------------
+
+  // --- ADD ApiProperty HERE ---
+  @ApiProperty({
+    description: '(Optional) The max percentage of an order that can be discounted with a REDEMPTION rule.',
+    example: 50,
+    default: 100,
+    required: false,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  max_redeem_percentage?: number;
+
+  @ApiProperty({
+    description: '(Optional) Whether the rule is currently active.',
+    required: false,
+    default: true,
+  })
   @IsOptional()
   @IsBoolean()
   is_active?: boolean;
 
-  @ApiProperty({ required: false, description: 'The UTC date-time when the rule becomes active.' })
+  @ApiProperty({
+    description: '(Optional) The UTC date-time when the rule becomes active (ISO 8601 format).',
+    required: false,
+    example: '2024-12-01T00:00:00.000Z',
+  })
   @IsOptional()
   @IsDateString()
   start_date?: string;
 
-  @ApiProperty({ required: false, description: 'The UTC date-time when the rule expires.' })
+  @ApiProperty({
+    description: '(Optional) The UTC date-time when the rule expires (ISO 8601 format).',
+    required: false,
+    example: '2024-12-31T23:59:59.000Z',
+  })
   @IsOptional()
   @IsDateString()
   end_date?: string;

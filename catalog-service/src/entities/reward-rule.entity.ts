@@ -23,10 +23,26 @@ export class RewardRule {
   @Column({ type: 'enum', enum: RuleType })
   type: RuleType;
 
-  // For EARNING rules: points per currency unit (e.g., 0.1 for 1 point per 10 currency)
-  // For REDEMPTION rules: currency per point (e.g., 0.1 for 1 currency per 10 points)
+  
   @Column({ type: 'decimal', precision: 10, scale: 4 })
   conversion_rate: number;
+
+  @Column({
+    type: 'decimal',
+    precision: 10,
+    scale: 2,
+    default: 0,
+    nullable: false,
+    comment: 'The minimum order total required for this rule to apply.',
+  })
+  min_order_value: number;
+
+  @Column({
+    type: 'int',
+    default: 100,
+    comment: 'The maximum percentage of an order total that can be paid for with points using this rule.',
+  })
+  max_redeem_percentage: number;
 
   @Column({ type: 'boolean', default: false })
   is_active: boolean;
