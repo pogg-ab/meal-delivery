@@ -406,10 +406,24 @@ async ownerResponse(ownerId: string, orderId: string, accepted: boolean, reason?
 
     if (accepted) {
       // Logic for moving to payment is the same as before
-      const confirmedOrderPayload = { /* ... your payload ... */ };
+      const confirmedOrderPayload = {
+        order_id: order.id,
+        customer_id: order.customer_id,
+        restaurant_id: order.restaurant_id,
+        status: OrderStatus.ACCEPTED,
+      };
       await this.kafka.emit('order.confirmed', confirmedOrderPayload);
-      
-      const paymentPayload = { /* ... your payload ... */ };
+
+      const paymentPayload = {
+        order_id: order.id,
+        amount: Number(order.total_amount),
+        currency: order.currency,
+        customer_id: order.customer_id,
+        restaurant_id: order.restaurant_id,
+        customer_name: order.customer_name,
+        platform_topup_needed: (order.discount_breakdown as any)
+          ?.platform_topup_needed,
+      };
       await this.kafka.emit('order.awaiting_payment', paymentPayload);
 
       order.status = OrderStatus.AWAITING_PAYMENT;
