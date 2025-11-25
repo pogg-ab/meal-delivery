@@ -501,10 +501,10 @@ async handlePaymentInitiated(payload: any) {
 
 // Optionally: emit websocket update via gateway (if injected) so customer/restaurant UI updates
 try {
-// this.gateway.emitOrderUpdated(order);
-  } catch (e) {
- // ignore
- }
+  this.gateway.emitOrderUpdated(order);
+} catch (e) {
+  this.logger.warn('Gateway emitOrderUpdated failed', e as any);
+}
   return order;
 }
 
