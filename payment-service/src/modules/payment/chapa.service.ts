@@ -72,6 +72,13 @@ export class ChapaService {
     return res.data;
   }
 
+  async getSubaccounts() {
+    const res = await this.client.get('/v1/subaccount', {
+      headers: this.headers(),
+    });
+    return res.data;
+  }
+
   async refundTransaction(payload: any) {
     const res = await this.client.post('/v1/transaction/refund', payload, {
       headers: this.headers(),

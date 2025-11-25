@@ -924,11 +924,52 @@ export class PaymentsService {
             : null,
       });
     } catch (err: any) {
-      logger.error(
-        'Chapa createSubaccount failed',
-        err?.response?.data ?? err?.message ?? err,
+      const errMsg =
+        err?.response?.data?.message ?? err?.message ?? JSON.stringify(err);
+      logger.warn(
+        `Chapa createSubaccount failed: ${errMsg}. Attempting recovery...`,
       );
-      throw new Error('Chapa subaccount creation failed');
+
+      // If subaccount exists, try to find it by account number
+      if (
+        String(errMsg).toLowerCase().includes('exist') ||
+        String(errMsg).toLowerCase().includes('duplicate')
+      ) {
+        try {
+          const listResp = await this.chapa.getSubaccounts();
+          const allSubs = listResp?.data ?? listResp?.subaccounts ?? [];
+          if (Array.isArray(allSubs)) {
+            const match = allSubs.find(
+              (s: any) =>
+                String(s.account_number) === String(account_number) &&
+                String(s.bank_code) === String(bank_code),
+            );
+            if (match) {
+              logger.log(
+                `Found existing subaccount for restaurant=${restaurant_id} (id=${match.id})`,
+              );
+              resp = {
+                status: 'success',
+                message: 'Recovered existing subaccount',
+                data: match,
+              };
+            }
+          }
+        } catch (findErr) {
+          logger.error(
+            'Failed to list subaccounts for recovery',
+            findErr?.message,
+          );
+        }
+      }
+
+      if (!resp) {
+        logger.error(
+          'Chapa createSubaccount failed and recovery failed',
+          err?.response?.data ?? err?.message ?? err,
+        );
+        throw new Error('Chapa subaccount creation failed');
+      }
     }
 
     const chapa_subaccount_id = resp?.data?.subaccount_id ?? resp?.id ?? null;
