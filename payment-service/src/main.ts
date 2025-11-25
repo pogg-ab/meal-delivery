@@ -1,5 +1,3 @@
-
-
 import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
@@ -14,7 +12,9 @@ import * as bodyParser from 'body-parser';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const nodeCrypto = require('crypto');
 if (!('crypto' in globalThis)) {
-  (globalThis as any).crypto = nodeCrypto.webcrypto ?? { randomUUID: nodeCrypto.randomUUID };
+  (globalThis as any).crypto = nodeCrypto.webcrypto ?? {
+    randomUUID: nodeCrypto.randomUUID,
+  };
 }
 
 function setupSwagger(app: INestApplication) {
@@ -25,11 +25,17 @@ function setupSwagger(app: INestApplication) {
     .setTitle('Payment Service')
     .setDescription('API for Payment processing.')
     .setVersion('1.0')
-    .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'access-token')
+    .addBearerAuth(
+      { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+      'access-token',
+    )
     .build();
 
   const document = SwaggerModule.createDocument(app, swaggerConfig);
-  document.servers = [{ url: `http://localhost:${PORT}` }];
+  document.servers = [
+    { url: `http://localhost:${PORT}` },
+    { url: `https://mealsystem.basirahtv.com/payment` },
+  ];
   SwaggerModule.setup('/api/docs', app, document, {
     swaggerOptions: { persistAuthorization: true },
     customSiteTitle: 'Payment Service - API Docs',
@@ -63,14 +69,12 @@ async function bootstrap() {
 
   const configService = app.get(ConfigService);
   const PORT = configService.get<number>('PORT', 3008);
-  const NODE_ENV = configService.get<string>('NODE_ENV', 'development');
 
   app.enableCors();
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 
-  if (NODE_ENV !== 'production') {
-    setupSwagger(app);
-  }
+  // Always enable Swagger
+  setupSwagger(app);
 
   // Connect and start the Kafka microservice listener
   app.connectMicroservice<MicroserviceOptions>(kafkaConfig);
@@ -80,10 +84,13 @@ async function bootstrap() {
   await app.listen(PORT);
 
   console.log(`🚀 Payment Service running on http://localhost:${PORT}`);
-  if (NODE_ENV !== 'production') {
-    console.log(`📖 Swagger docs: http://localhost:${PORT}/api/docs`);
-  }
+  console.log(`📖 Swagger docs: http://localhost:${PORT}/api/docs`);
+  console.log(
+    `📖 Production Swagger docs: https://mealsystem.basirahtv.com/payment/api/docs`,
+  );
 }
 
-bootstrap();
-
+bootstrap().catch((err) => {
+  console.error('Error starting server:', err);
+  process.exit(1);
+});

@@ -10,4 +10,4 @@ export const kafkaConfig: KafkaOptions = {
       groupId: process.env.KAFKA_GROUP_ID || 'project-management-consumer',
     },
   },
-}; 
+};

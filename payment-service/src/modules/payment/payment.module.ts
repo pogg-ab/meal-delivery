@@ -17,14 +17,26 @@ import { PayoutChild } from 'src/entities/payout-children.entity';
 import { AggregatedPayout } from 'src/entities/aggregated-payout.entity';
 import { HttpModule } from '@nestjs/axios';
 
-
 @Module({
-imports: [
-    TypeOrmModule.forFeature([Payment, RestaurantSubaccount, PlatformAccount, PayoutBatch, PayoutChild, AggregatedPayout ]),
-    
-],
-controllers: [PaymentsController],
-providers: [PaymentsService, JwtStrategy, ChapaService, KafkaProvider, PayoutQueueService, PayoutQueueWorker ],
-exports: [PaymentsService],
+  imports: [
+    TypeOrmModule.forFeature([
+      Payment,
+      RestaurantSubaccount,
+      PlatformAccount,
+      PayoutBatch,
+      PayoutChild,
+      AggregatedPayout,
+    ]),
+  ],
+  controllers: [PaymentsController],
+  providers: [
+    PaymentsService,
+    JwtStrategy,
+    ChapaService,
+    KafkaProvider,
+    PayoutQueueService,
+    PayoutQueueWorker,
+  ],
+  exports: [PaymentsService],
 })
 export class PaymentsModule {}

@@ -42,8 +42,10 @@ export function buildChapaFormPayload(opts: {
   if (opts.last_name) params.append('last_name', opts.last_name);
   if (opts.phone_number) params.append('phone_number', opts.phone_number);
 
-  if (opts.customization?.title) params.append('customization[title]', opts.customization.title);
-  if (opts.customization?.description) params.append('customization[description]', opts.customization.description);
+  if (opts.customization?.title)
+    params.append('customization[title]', opts.customization.title);
+  if (opts.customization?.description)
+    params.append('customization[description]', opts.customization.description);
 
   if (opts.meta) {
     for (const [k, v] of Object.entries(opts.meta)) {

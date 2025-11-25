@@ -1,8 +1,16 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  Index,
+} from 'typeorm';
 
 const DecimalTransformer = {
   to: (v: number) => v,
-  from: (v: string) => (v === null || typeof v === 'undefined' ? 0 : parseFloat(v)),
+  from: (v: string) =>
+    v === null || typeof v === 'undefined' ? 0 : parseFloat(v),
 };
 
 @Entity({ name: 'payout_children' })

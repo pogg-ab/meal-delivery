@@ -1,10 +1,10 @@
-import { MigrationInterface, QueryRunner } from "typeorm";
+import { MigrationInterface, QueryRunner } from 'typeorm';
 
 export class InitSchemats1759573153722 implements MigrationInterface {
-    name = 'InitSchema.ts1759573153722'
+  name = 'InitSchema.ts1759573153722';
 
-    public async up(queryRunner: QueryRunner): Promise<void> {
-        await queryRunner.query(`
+  public async up(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(`
             CREATE TABLE "restaurant_subaccounts" (
                 "id" uuid NOT NULL DEFAULT uuid_generate_v4(),
                 "restaurant_id" uuid NOT NULL,
@@ -14,10 +14,10 @@ export class InitSchemats1759573153722 implements MigrationInterface {
                 CONSTRAINT "PK_940c05ab55003c207960ec77a12" PRIMARY KEY ("id")
             )
         `);
-        await queryRunner.query(`
+    await queryRunner.query(`
             CREATE UNIQUE INDEX "IDX_1cc0c6bf23d2db7a5964bcf588" ON "restaurant_subaccounts" ("restaurant_id")
         `);
-        await queryRunner.query(`
+    await queryRunner.query(`
             CREATE TABLE "payments" (
                 "id" uuid NOT NULL DEFAULT uuid_generate_v4(),
                 "order_id" uuid NOT NULL,
@@ -32,30 +32,29 @@ export class InitSchemats1759573153722 implements MigrationInterface {
                 CONSTRAINT "PK_197ab7af18c93fbb0c9b28b4a59" PRIMARY KEY ("id")
             )
         `);
-        await queryRunner.query(`
+    await queryRunner.query(`
             CREATE UNIQUE INDEX "IDX_b2f7b823a21562eeca20e72b00" ON "payments" ("order_id")
         `);
-        await queryRunner.query(`
+    await queryRunner.query(`
             CREATE UNIQUE INDEX "IDX_a8a7d8c89a4ef936b9ad7028d2" ON "payments" ("tx_ref")
         `);
-    }
+  }
 
-    public async down(queryRunner: QueryRunner): Promise<void> {
-        await queryRunner.query(`
+  public async down(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(`
             DROP INDEX "public"."IDX_a8a7d8c89a4ef936b9ad7028d2"
         `);
-        await queryRunner.query(`
+    await queryRunner.query(`
             DROP INDEX "public"."IDX_b2f7b823a21562eeca20e72b00"
         `);
-        await queryRunner.query(`
+    await queryRunner.query(`
             DROP TABLE "payments"
         `);
-        await queryRunner.query(`
+    await queryRunner.query(`
             DROP INDEX "public"."IDX_1cc0c6bf23d2db7a5964bcf588"
         `);
-        await queryRunner.query(`
+    await queryRunner.query(`
             DROP TABLE "restaurant_subaccounts"
         `);
-    }
-
+  }
 }

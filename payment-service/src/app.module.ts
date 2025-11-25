@@ -1,11 +1,10 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule, ConfigService} from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { KafkaProvider } from './providers/kafka.provider';
 import { PaymentsModule } from './modules/payment/payment.module';
-
 
 @Module({
   imports: [
@@ -36,7 +35,7 @@ import { PaymentsModule } from './modules/payment/payment.module';
     // InventoryModule, // For the /inventory endpoints and consumer
     // OrdersModule,
     // ReportsModule, // From the left side
-    PaymentsModule
+    PaymentsModule,
   ],
   controllers: [AppController],
   providers: [KafkaProvider, AppService],
