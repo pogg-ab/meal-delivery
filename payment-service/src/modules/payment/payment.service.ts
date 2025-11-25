@@ -287,20 +287,95 @@ export class PaymentsService {
         `Chapa initialization failed for order=${order_id}`,
         chapaErr,
       );
-      try {
-        await this.kafka.emit('payment.failed', {
-          order_id,
-          tx_ref,
-          reason: 'chapa_init_error',
-          error: chapaErr,
-        });
-      } catch (e) {
+
+      // --- RECOVERY LOGIC FOR INVALID SUBACCOUNTS ---
+      // If the error indicates a subaccount issue (e.g. "Invalid subaccount", "Subaccount not found"),
+      // we try to recreate the subaccount for the current environment.
+      const errString = JSON.stringify(chapaErr).toLowerCase();
+      if (
+        errString.includes('subaccount') &&
+        (errString.includes('invalid') ||
+          errString.includes('found') ||
+          errString.includes('exist'))
+      ) {
         this.logger.warn(
-          'Failed emitting payment.failed after chapa init failure',
-          (e as any)?.message ?? e,
+          `Detected invalid subaccount error for order ${order_id}. Attempting to recreate subaccounts...`,
         );
+
+        try {
+          // 1. Recreate Restaurant Subaccount
+          if (restSub && restSub.account_number && restSub.bank_code) {
+            this.logger.log(
+              `Recreating restaurant subaccount for ${restSub.restaurant_id}`,
+            );
+            const newRestSub = await this.createSubaccountInternal(
+              restSub.restaurant_id,
+              {
+                business_name: restSub.business_name ?? 'Restaurant',
+                account_name: restSub.account_name ?? 'Restaurant Account',
+                account_number: restSub.account_number,
+                bank_code: Number(restSub.bank_code),
+                split_type: 'percentage', // default, will be overridden by transaction
+                split_value: 0.05, // default
+              },
+            );
+            // Update the ID in our local list
+            const idx = subaccounts.findIndex(
+              (s) => s.id === restSub.chapa_subaccount_id,
+            );
+            
+            const newId = Array.isArray(newRestSub) ? newRestSub[0].chapa_subaccount_id : newRestSub.chapa_subaccount_id;
+
+            if (idx >= 0 && newId) {
+              subaccounts[idx].id = newId;
+            }
+          }
+
+          // 2. Recreate Platform Subaccount
+          // We need to fetch the platform account details first.
+          // Since we don't have them in 'platformChapaId' variable (only the ID),
+          // we might need to fetch the entity or use default env vars if available.
+          // For now, we'll skip platform recreation unless we have data, or we can try to fetch it.
+          const platformRec = await this.platformRepo.findOne({ where: {} });
+          // If we have raw data or if we can infer it...
+          // Actually, platform subaccount creation usually requires specific config.
+          // If it's missing/invalid, we might just rely on the restaurant fix first.
+          // But if the error persists, we might need manual intervention for platform subaccount.
+
+          // Retry initialization with new subaccounts
+          if (formPayload && typeof formPayload === 'object' && 'subaccounts' in formPayload) {
+             (formPayload as any).subaccounts = subaccounts;
+          }
+          
+          this.logger.log(
+            `Retrying Chapa transaction for order=${order_id} with new subaccounts`,
+          );
+          initResp = await this.chapa.initializeTransaction(formPayload);
+        } catch (retryErr: any) {
+          this.logger.error(
+            `Retry failed for order=${order_id}`,
+            retryErr?.response?.data ?? retryErr?.message,
+          );
+          // Fall through to failure emission
+        }
       }
-      return null;
+
+      if (!initResp) {
+        try {
+          await this.kafka.emit('payment.failed', {
+            order_id,
+            tx_ref,
+            reason: 'chapa_init_error',
+            error: chapaErr,
+          });
+        } catch (e) {
+          this.logger.warn(
+            'Failed emitting payment.failed after chapa init failure',
+            (e as any)?.message ?? e,
+          );
+        }
+        return null;
+      }
     }
 
     // Extract checkout_url / expires_at / chapa_tx_id
