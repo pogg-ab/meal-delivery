@@ -347,8 +347,23 @@ export class PaymentsService {
          const errStr = JSON.stringify(chapaErr).toLowerCase();
          if (errStr.includes('subaccount') || errStr.includes('split')) {
              this.logger.warn(`Subaccount split failed for order ${order_id}. Retrying without splits (fallback).`);
-             const fallbackPayload = { ...formPayload };
-             delete (fallbackPayload as any).subaccounts;
+             
+             // Re-build payload without subaccounts (spreading URLSearchParams fails)
+             const fallbackPayload = buildChapaFormPayload({
+               amount,
+               currency,
+               tx_ref,
+               callback_url: '',
+               return_url: process.env.CHAPA_RETURN_URL,
+               first_name: customer_name,
+               customization: {
+                 title: 'Order payment',
+                 description: `Order ${order_id}`,
+               },
+               meta,
+               subaccounts: [], // Send empty subaccounts to disable split
+             });
+
              try {
                 initResp = await this.chapa.initializeTransaction(fallbackPayload);
                 this.logger.log(`Fallback (no-split) transaction initialized for order ${order_id}`);
