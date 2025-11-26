@@ -15,6 +15,11 @@ export class ChapaService {
       baseURL: process.env.CHAPA_BASE_URL || 'https://api.chapa.co',
       timeout: 10000,
     });
+    if (this.secret) {
+      this.logger.log(`Chapa Service initialized with Secret Key: ${this.secret.substring(0, 12)}...`);
+    } else {
+      this.logger.error('Chapa Secret Key is MISSING!');
+    }
   }
 
   private headers() {

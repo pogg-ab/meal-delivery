@@ -148,43 +148,19 @@ export class PaymentsService {
     }
 
     // Ensure restaurant subaccount exists
-    const restSub = await this.subRepo.findOne({ where: { restaurant_id } });
+    let restSub = await this.subRepo.findOne({ where: { restaurant_id } });
     if (!restSub) {
       this.logger.warn(
-        `No restaurant subaccount for restaurant_id=${restaurant_id}`,
+        `No restaurant subaccount for restaurant_id=${restaurant_id}. Proceeding without split (funds go to main account).`,
       );
-      try {
-        await this.kafka.emit('payment.failed', {
-          order_id,
-          reason: 'missing_subaccount',
-        });
-      } catch (e) {
-        this.logger.warn(
-          'Failed emitting payment.failed for missing_subaccount',
-          (e as any)?.message ?? e,
-        );
-      }
-      return null;
     }
 
     // Ensure platform chapa subaccount exists
     const platformChapaId = await this.getPlatformChapaId();
     if (!platformChapaId) {
       this.logger.warn(
-        `Platform subaccount not configured (order=${order_id})`,
+        `Platform subaccount not configured (order=${order_id}). Proceeding without platform split.`,
       );
-      try {
-        await this.kafka.emit('payment.failed', {
-          order_id,
-          reason: 'missing_platform_subaccount',
-        });
-      } catch (e) {
-        this.logger.warn(
-          'Failed emitting payment.failed for missing_platform_subaccount',
-          (e as any)?.message ?? e,
-        );
-      }
-      return null;
     }
 
     // Generate tx_ref
@@ -233,18 +209,23 @@ export class PaymentsService {
       id: string;
       split_type: 'percentage' | 'flat';
       split_value: number;
-    }> = [
-      {
+    }> = [];
+
+    if (restSub && restSub.chapa_subaccount_id) {
+      subaccounts.push({
         id: restSub.chapa_subaccount_id,
         split_type: 'percentage',
         split_value: restSplitValue,
-      },
-      {
+      });
+    }
+
+    if (platformChapaId) {
+      subaccounts.push({
         id: platformChapaId,
         split_type: 'percentage',
         split_value: platformSplitValue,
-      },
-    ];
+      });
+    }
 
     // Build meta: include order_id, restaurant_id and platform_topup_needed (so webhook can read directly)
     const meta: any = { order_id, restaurant_id };
@@ -259,6 +240,7 @@ export class PaymentsService {
       currency,
       tx_ref,
       callback_url: '',
+      return_url: process.env.CHAPA_RETURN_URL,
       first_name: customer_name,
       customization: {
         title: 'Order payment',
@@ -358,6 +340,22 @@ export class PaymentsService {
           );
           // Fall through to failure emission
         }
+      }
+
+      // --- FALLBACK: If subaccount split failed, try without splits ---
+      if (!initResp) {
+         const errStr = JSON.stringify(chapaErr).toLowerCase();
+         if (errStr.includes('subaccount') || errStr.includes('split')) {
+             this.logger.warn(`Subaccount split failed for order ${order_id}. Retrying without splits (fallback).`);
+             const fallbackPayload = { ...formPayload };
+             delete (fallbackPayload as any).subaccounts;
+             try {
+                initResp = await this.chapa.initializeTransaction(fallbackPayload);
+                this.logger.log(`Fallback (no-split) transaction initialized for order ${order_id}`);
+             } catch (fallbackErr: any) {
+                this.logger.error('Fallback transaction failed', fallbackErr?.response?.data ?? fallbackErr?.message);
+             }
+         }
       }
 
       if (!initResp) {
