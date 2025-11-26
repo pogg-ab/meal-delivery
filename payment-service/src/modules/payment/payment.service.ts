@@ -1117,9 +1117,16 @@ export class PaymentsService {
     const payment = await this.paymentRepo.findOne({ where: { tx_ref } });
     if (payment) {
       const status = verifyResp?.data?.status ?? verifyResp?.status ?? null;
-      if (status === 'success' || status === 'PAID' || status === 'SUCCESS') {
+      const s = String(status).toLowerCase();
+      if (s === 'success' || s === 'paid') {
         payment.status = 'paid';
         payment.chapa_tx_id = verifyResp?.data?.id ?? payment.chapa_tx_id;
+        payment.payment_data = verifyResp;
+        // payment.paid_at = new Date(); // Optional: if you have this column
+        await this.paymentRepo.save(payment);
+      } else {
+        // If not success, mark as failed/cancelled so we don't leave it as 'initiated'
+        payment.status = 'failed';
         payment.payment_data = verifyResp;
         await this.paymentRepo.save(payment);
       }

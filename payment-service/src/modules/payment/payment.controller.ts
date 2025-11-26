@@ -223,7 +223,23 @@ export class PaymentsController {
 
   @Get('success')
   @ApiOperation({ summary: 'Payment success landing page (redirects to app)' })
-  paymentSuccess(@Res() res: Response) {
-    return res.redirect('basirahmeal://payment_success');
+  async paymentSuccess(@Query() query: any, @Res() res: Response) {
+    const tx_ref = query.tx_ref || query.trx_ref;
+    console.log('Payment return_url hit. Query:', query);
+
+    if (tx_ref) {
+      try {
+        const verification = await this.svc.verifyTxRef(tx_ref);
+        const status = verification?.data?.status ?? verification?.status;
+        
+        if (String(status).toLowerCase() === 'success') {
+           return res.redirect('basirahmeal://payment_success');
+        }
+      } catch (e) {
+        console.error('Verification failed on return_url', e);
+      }
+    }
+    
+    return res.redirect('basirahmeal://payment_cancel');
   }
 }
