@@ -11,6 +11,7 @@ import {
   Query,
   Res,
 } from '@nestjs/common';
+import { Response } from 'express';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -222,7 +223,7 @@ export class PaymentsController {
 
   @Get('success')
   @ApiOperation({ summary: 'Payment success landing page (redirects to app)' })
-  paymentSuccess(@Res() res: any) {
+  paymentSuccess(@Res() res: Response) {
     return res.redirect('basirahmeal://payment_success');
   }
 }
