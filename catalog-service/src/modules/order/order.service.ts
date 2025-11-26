@@ -522,9 +522,10 @@ try {
   }
 
   // Normalize detection of success: support multiple shapes
+  // CRITICAL FIX: Check data.status first because Chapa verify response has top-level status='success' even for failed txs
   const payStatus =
-    payload?.payment_data?.status ??
     payload?.payment_data?.data?.status ??
+    payload?.payment_data?.status ??
     payload?.status ??
     payload?.payment_status ??
     null;
