@@ -9,6 +9,7 @@ import {
   UnauthorizedException,
   UseGuards,
   Query,
+  Res,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -217,5 +218,11 @@ export class PaymentsController {
       requestId: undefined,
     });
     return { status: 'enqueued', jobId: job.id, batchId: id };
+  }
+
+  @Get('success')
+  @ApiOperation({ summary: 'Payment success landing page (redirects to app)' })
+  paymentSuccess(@Res() res: any) {
+    return res.redirect('basirahmeal://payment_success');
   }
 }
