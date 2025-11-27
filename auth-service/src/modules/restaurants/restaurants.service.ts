@@ -55,6 +55,58 @@ export class RestaurantsService {
     ) {}
 
 
+    // --- Helper to emit full restaurant update ---
+    private async emitRestaurantUpdate(restaurantId: string) {
+        const restaurant = await this.restaurantRepository.findOne({
+            where: { id: restaurantId },
+            relations: ['addresses', 'hours'],
+        });
+
+        if (!restaurant) return;
+
+        const primaryAddress = restaurant.addresses && restaurant.addresses.length > 0
+            ? restaurant.addresses[0]
+            : null;
+
+        const flattenedHours = {
+            sunday_open: null, sunday_close: null,
+            monday_open: null, monday_close: null,
+            tuesday_open: null, tuesday_close: null,
+            wednesday_open: null, wednesday_close: null,
+            thursday_open: null, thursday_close: null,
+            friday_open: null, friday_close: null,
+            saturday_open: null, saturday_close: null,
+        };
+
+        const dayMap = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+        for (const hour of restaurant.hours) {
+            const dayName = dayMap[hour.weekday];
+            if (dayName && !hour.is_closed) {
+                flattenedHours[`${dayName}_open`] = hour.open_time;
+                flattenedHours[`${dayName}_close`] = hour.close_time;
+            }
+        }
+
+        // Emit 'restaurant.profile.updated' which the catalog service listens to
+        this.kafkaProvider.emit('restaurant.profile.updated', {
+            id: restaurant.id,
+            name: restaurant.name,
+            description: restaurant.description,
+            owner_id: restaurant.owner_id,
+            is_active: restaurant.is_active,
+            address: primaryAddress ? {
+                street: primaryAddress.street,
+                city: primaryAddress.city,
+                region: primaryAddress.region,
+                country: primaryAddress.country,
+                latitude: primaryAddress.latitude,
+                longitude: primaryAddress.longitude,
+            } : null,
+            ...flattenedHours,
+        });
+    }
+
     async register(registerDto: RegisterRestaurantDto, ownerId: string): Promise<Restaurant> {
         const { name, description, email, phone, address, hours } = registerDto;
 
@@ -313,6 +365,9 @@ async updateProfile(
   
   const savedRestaurant = await this.restaurantRepository.save(restaurant);
 
+  // Emit update event
+  await this.emitRestaurantUpdate(savedRestaurant.id);
+
   return savedRestaurant;
 }
 async findForReviewByStatus(statuses: string[]): Promise<Restaurant[]> {
@@ -433,7 +488,12 @@ async getRestaurantProfileByOwnerId(ownerId: string): Promise<Restaurant> {
     });
   }
   
-  return this.addressRepository.save(address);
+  const savedAddress = await this.addressRepository.save(address);
+  
+  // Emit update event
+  await this.emitRestaurantUpdate(restaurantId);
+
+  return savedAddress;
 }
 
 async updateHours(
@@ -446,7 +506,7 @@ async updateHours(
   if (restaurant.owner_id !== ownerId) { throw new UnauthorizedException('You do not have permission to edit this restaurant.'); }
 
   // This is the "delete-then-insert" strategy, wrapped in a transaction for safety
-  return this.entityManager.transaction(async transactionalEntityManager => {
+  const result = await this.entityManager.transaction(async transactionalEntityManager => {
     const hourRepo = transactionalEntityManager.getRepository(RestaurantHour);
 
     // 1. Delete all existing hours for this restaurant
@@ -461,6 +521,11 @@ async updateHours(
     // 3. Save all the new hours in a single operation
     return hourRepo.save(newHours);
   });
+
+  // Emit update event (outside transaction)
+  await this.emitRestaurantUpdate(restaurantId);
+
+  return result;
 }
 
 async upsertBankDetails(
