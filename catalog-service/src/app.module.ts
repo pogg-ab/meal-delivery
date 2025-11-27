@@ -22,6 +22,7 @@ import { MenuPersonalizationModule } from './modules/menu-personalization/menu-p
 // --- MERGE RESOLUTION: KEPT BOTH IMPORTS ---
 import { RewardsModule } from './modules/rewards/rewards.module';
 import { ReviewsModule } from './modules/reviews/reviews.module';
+import { AnalyticsModule } from './modules/analytics/analytics.module';
 
 @Module({
   imports: [
@@ -93,7 +94,8 @@ import { ReviewsModule } from './modules/reviews/reviews.module';
      MenuPersonalizationModule,
      // --- MERGE RESOLUTION: KEPT BOTH MODULES ---
      RewardsModule,
-     ReviewsModule
+     ReviewsModule,
+     AnalyticsModule
   ],
   providers: [KafkaProvider],
   exports: [KafkaProvider],

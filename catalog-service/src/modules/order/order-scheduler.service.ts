@@ -97,12 +97,17 @@ export class OrderSchedulerService {
       };
 
       try {
-        await this.kafka.emit('order.created', eventPayload);
-        this.logger.log(`Emitted order.created event for scheduled order ${order.id}`);
-      } catch (e) {
-        this.logger.error(`Kafka emit failed for scheduled order ${order.id}`, e);
-        // You might want to add retry logic here or mark the job as failed
-      }
+  const dueEventPayload = {
+    orderId: order.id,
+    ownerId: order.restaurant.owner_id,
+    customerName: order.customer_name,
+    scheduledFor: job.runAt,
+  };
+  await this.kafka.emit('order.schedule.due', dueEventPayload);
+  this.logger.log(`Emitted order.schedule.due event for scheduled order ${order.id}`);
+} catch (e) {
+  this.logger.error(`Kafka emit failed for order.schedule.due event for order ${order.id}`, e);
+}
     });
   }
 }

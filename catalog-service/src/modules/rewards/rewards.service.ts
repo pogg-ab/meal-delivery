@@ -41,14 +41,14 @@ export class RewardsService {
   // =================== CORE LOGIC (DYNAMIC RULES) ================== //
   // ================================================================= //
 
-  // In src/modules/rewards/rewards.service.ts
-
-async addPointsForCompletedOrder(order: Order, manager: EntityManager): Promise<void> {
+ 
+async addPointsForCompletedOrder(order: Order, manager: EntityManager): Promise<number> {
     const earningRule = await this.getActiveRule(RuleType.EARNING);
 
     if (!earningRule) {
       this.logger.warn(`No active EARNING rule found for order ${order.id}. Skipping point award.`);
-      return;
+      // --- CHANGE 2 of 4: Return 0 when no points are awarded ---
+      return 0;
     }
 
   
@@ -56,14 +56,16 @@ async addPointsForCompletedOrder(order: Order, manager: EntityManager): Promise<
       this.logger.log(
         `Order ${order.id} total (${order.total_amount}) is below the minimum required value (${earningRule.min_order_value}). Skipping point award.`
       );
-      return; 
+      // --- Also return 0 here ---
+      return 0; 
     }
     
     const pointsToAdd = Math.floor(Number(order.total_amount) * Number(earningRule.conversion_rate));
 
     if (pointsToAdd <= 0) {
       this.logger.log(`Calculated 0 or fewer points to add for order ${order.id}.`);
-      return;
+      // --- CHANGE 3 of 4: Return 0 when no points are awarded ---
+      return 0;
     }
 
     const balanceRepo = manager.getRepository(RewardPointsBalance);
@@ -87,7 +89,13 @@ async addPointsForCompletedOrder(order: Order, manager: EntityManager): Promise<
     await ledgerRepo.save(ledgerEntry);
 
     this.logger.log(`Awarded ${pointsToAdd} points to customer ${order.customer_id} for order ${order.id}`);
+
+    // --- CHANGE 4 of 4: Return the actual number of points added ---
+    return pointsToAdd;
 }
+
+
+
 
 async processRedemption(
     customerId: string,

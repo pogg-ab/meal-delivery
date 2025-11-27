@@ -806,7 +806,7 @@ async markOrderPreparing(ownerId: string, orderId: string, note?: string) {
     // Notify clients and other services
     this.gateway.emitOrderUpdated(committedOrder);
     try {
-      await this.kafka.emit('order.preparing', { order_id: committedOrder.id, restaurant_id: committedOrder.restaurant_id });
+      await this.kafka.emit('order.preparing', { order_id: committedOrder.id, restaurant_id: committedOrder.restaurant_id, customer_id: committedOrder.customer_id,  });
     } catch (e) {
       this.logger.warn('Kafka emit failed for order.preparing', e as any);
     }
@@ -819,7 +819,7 @@ async cancelOrder(customerId: string, orderId: string, reason?: string) {
       const orderRepo = manager.getRepository(Order);
       const eventRepo = manager.getRepository(OrderEvent);
 
-      const order = await orderRepo.findOne({ where: { id: orderId }, relations: ['items'] });
+      const order = await orderRepo.findOne({ where: { id: orderId }, relations: ['items', 'restaurant'] });
       if (!order) throw new NotFoundException('Order not found');
       if (order.customer_id !== customerId) throw new BadRequestException('Not your order');
 
@@ -869,7 +869,7 @@ async cancelOrder(customerId: string, orderId: string, reason?: string) {
     }).then(async (committedOrder) => {
       this.gateway.emitOrderUpdated(committedOrder);
       try {
-        await this.kafka.emit('order.cancelled', { order_id: committedOrder.id, reason });
+        await this.kafka.emit('order.cancelled', { order_id: committedOrder.id, reason, customer_id: committedOrder.customer_id, owner_id: committedOrder.restaurant.owner_id, });
       } catch (e) {
         this.logger.warn('Kafka emit failed for order.cancelled', e as any);
       }
@@ -1007,10 +1007,10 @@ async getScheduledOrdersForRestaurant(ownerId: string, restaurantId: string, lim
   }
 
 
+// In catalog-service/src/modules/orders/order.service.ts
+
 async markAsComplete(ownerId: string, orderId: string): Promise<{ ok: boolean }> {
-    // The transaction will return the completed order, which we assign to this constant.
-    // This solves the "used before assigned" error in a clean, immutable way.
-    const committedOrder = await this.dataSource.transaction(async (manager) => {
+    const { committedOrder, pointsAwarded } = await this.dataSource.transaction(async (manager) => {
       const orderRepo = manager.getRepository(Order);
       const eventRepo = manager.getRepository(OrderEvent);
 
@@ -1021,8 +1021,6 @@ async markAsComplete(ownerId: string, orderId: string): Promise<{ ok: boolean }>
       if (!order.restaurant || order.restaurant.owner_id !== ownerId) {
         throw new BadRequestException('Not authorized to update this order');
       }
-
-      // State machine validation: Must be in READY state
       if (order.status !== OrderStatus.READY) {
         throw new BadRequestException(`Order cannot be marked as complete. Current status: ${order.status}`);
       }
@@ -1038,19 +1036,20 @@ async markAsComplete(ownerId: string, orderId: string): Promise<{ ok: boolean }>
         } as DeepPartial<OrderEvent>),
       );
 
-      // --- REWARDS INTEGRATION ---
-      await this.rewardsService.addPointsForCompletedOrder(savedOrder, manager);
+      const points = await this.rewardsService.addPointsForCompletedOrder(savedOrder, manager);
 
-      // --- RETURN THE FINAL ORDER FROM THE TRANSACTION ---
-      // This value will be the result of the `await this.dataSource.transaction(...)` call.
-      return savedOrder;
+      return { committedOrder: savedOrder, pointsAwarded: points };
     });
 
-    // The code below only runs if the transaction was successful and returned a valid order.
-    // The `committedOrder` constant is now guaranteed to be assigned.
+    // --- AFTER TRANSACTION ---
     
-    // Perform side-effects like WebSocket and Kafka emissions AFTER the transaction is committed.
+    // --- ADDED FOR DEBUGGING ---
+    this.logger.log(`Transaction complete. Value of pointsAwarded is: ${pointsAwarded}`);
+
+    // 1. WebSocket update
     this.gateway.emitOrderUpdated(committedOrder);
+
+    // 2. 'order.completed' event
     try {
       await this.kafka.emit('order.completed', {
         order_id: committedOrder.id,
@@ -1061,6 +1060,23 @@ async markAsComplete(ownerId: string, orderId: string): Promise<{ ok: boolean }>
       });
     } catch (e) {
       this.logger.warn('Kafka emit failed for order.completed', e as any);
+    }
+    
+    // 3. NEW Reward notification event
+    try {
+      if (pointsAwarded > 0) {
+        this.logger.log(`Condition met (pointsAwarded > 0). Emitting reward.points.earned event...`);
+        await this.kafka.emit('reward.points.earned', {
+          customerId: committedOrder.customer_id,
+          pointsAwarded: pointsAwarded,
+          orderId: committedOrder.id,
+        });
+        this.logger.log(`Emitted reward.points.earned event for customer ${committedOrder.customer_id}`);
+      } else {
+        this.logger.log(`Skipping reward.points.earned event because pointsAwarded is ${pointsAwarded}.`);
+      }
+    } catch (e) {
+      this.logger.warn('Kafka emit failed for reward.points.earned', e as any);
     }
     
     return { ok: true };

@@ -8,6 +8,12 @@ import { SendNotificationDto } from './dto/send-notification.dto';
 import { OrderConfirmedEvent } from './dto/order-confirmed.event';
 import { OrderCreatedEvent } from './dto/order-created.event';
 import { SendBatchNotificationDto } from './dto/send-batch-notification.dto';
+import { OrderPreparingEvent } from './dto/order-preparing.event';
+import { OrderReadyEvent } from './dto/order-ready.event';
+import { OrderCompletedEvent } from './dto/order-completed.event';
+import { OrderCancelledEvent } from './dto/order-cancelled.event';
+import { OrderScheduleDueEvent } from './dto/order-schedule-due.event';
+import { RewardPointsEarnedEvent } from './dto/reward-points-earned.event';
 
 // --- Define the shape of the new Kafka event payload ---
 class LowStockEvent {
@@ -125,6 +131,133 @@ export class NotificationsController {
       );
     }
   }
+
+@EventPattern('order.preparing')
+  async handleOrderPreparing(@Payload() data: OrderPreparingEvent) {
+    this.logger.log(`Received order.preparing event for customer ID: ${data.customer_id}`);
+    const tokens = await this.notificationsService.findTokensByUserId(data.customer_id);
+    
+    // --- UPDATED FOR CONSISTENT LOGGING ---
+    if (tokens.length === 0) {
+      this.logger.warn(`No device tokens found for customer ID: ${data.customer_id}.`);
+      return;
+    }
+    
+    const title = 'Your Order is Being Prepared!';
+    const body = `The restaurant has started preparing your order.`;
+    for (const token of tokens) {
+      await this.notificationsService.sendPushNotification(token.deviceToken, title, body, { orderId: data.order_id });
+    }
+  }
+
+  @EventPattern('order.ready')
+  async handleOrderReady(@Payload() data: OrderReadyEvent) {
+    this.logger.log(`Received order.ready event for customer ID: ${data.customer_id}`);
+    const tokens = await this.notificationsService.findTokensByUserId(data.customer_id);
+    
+    // --- UPDATED FOR CONSISTENT LOGGING ---
+    if (tokens.length === 0) {
+      this.logger.warn(`No device tokens found for customer ID: ${data.customer_id}.`);
+      return;
+    }
+    
+    const title = 'Your Order is Ready!';
+    const body = `Your order is now ready for pickup.`;
+    for (const token of tokens) {
+      await this.notificationsService.sendPushNotification(token.deviceToken, title, body, { orderId: data.order_id });
+    }
+  }
+
+  @EventPattern('order.completed')
+  async handleOrderCompleted(@Payload() data: OrderCompletedEvent) {
+    this.logger.log(`Received order.completed event for customer ID: ${data.customer_id}`);
+    const tokens = await this.notificationsService.findTokensByUserId(data.customer_id);
+    
+    // --- UPDATED FOR CONSISTENT LOGGING ---
+    if (tokens.length === 0) {
+      this.logger.warn(`No device tokens found for customer ID: ${data.customer_id}.`);
+      return;
+    }
+
+    const title = 'Order Completed!';
+    const body = `Enjoy your meal! Thank you for ordering with us.`;
+    for (const token of tokens) {
+      await this.notificationsService.sendPushNotification(token.deviceToken, title, body, { orderId: data.order_id });
+    }
+  }
+
+  @EventPattern('order.cancelled')
+  async handleOrderCancelled(@Payload() data: OrderCancelledEvent) {
+    this.logger.log(`Received order.cancelled event for order: ${data.order_id}`);
+
+    // Notify Customer
+    const customerTokens = await this.notificationsService.findTokensByUserId(data.customer_id);
+    if (customerTokens.length > 0) {
+      for (const token of customerTokens) {
+        await this.notificationsService.sendPushNotification(token.deviceToken, 'Order Cancelled', 'Your order has been successfully cancelled.', { orderId: data.order_id });
+      }
+    } else {
+      // --- UPDATED FOR CONSISTENT LOGGING ---
+      this.logger.warn(`No device tokens found for customer ID: ${data.customer_id}.`);
+    }
+
+    // Notify Restaurant Owner
+    const ownerTokens = await this.notificationsService.findTokensByUserId(data.owner_id);
+    if (ownerTokens.length > 0) {
+      for (const token of ownerTokens) {
+        await this.notificationsService.sendPushNotification(token.deviceToken, 'Order Cancelled by Customer', 'An order has been cancelled. Please check your dashboard.', { orderId: data.order_id });
+      }
+    } else {
+      // --- UPDATED FOR CONSISTENT LOGGING ---
+      this.logger.warn(`No device tokens found for owner ID: ${data.owner_id}.`);
+    }
+  }
+
+  @EventPattern('order.schedule.due')
+async handleOrderScheduleDue(@Payload() data: OrderScheduleDueEvent) {
+  this.logger.log(`Received order.schedule.due event for owner ID: ${data.ownerId}`);
+
+  const tokens = await this.notificationsService.findTokensByUserId(data.ownerId);
+  if (tokens.length === 0) {
+    this.logger.warn(`No device tokens found for owner ID: ${data.ownerId}.`);
+    return;
+  }
+
+  const title = 'Scheduled Order Is Now Active';
+  const body = `The scheduled order for "${data.customerName}" is now due and has been moved to your active orders queue.`;
+
+  for (const token of tokens) {
+    await this.notificationsService.sendPushNotification(
+      token.deviceToken,
+      title,
+      body,
+      { orderId: data.orderId },
+    );
+  }
+}
+
+@EventPattern('reward.points.earned')
+async handleRewardPointsEarned(@Payload() data: RewardPointsEarnedEvent) {
+  this.logger.log(`Received reward.points.earned event for customer ID: ${data.customerId}`);
+
+  const tokens = await this.notificationsService.findTokensByUserId(data.customerId);
+  if (tokens.length === 0) {
+    this.logger.warn(`No device tokens found for customer ID: ${data.customerId}.`);
+    return;
+  }
+
+  const title = "You've Earned Reward Points!";
+  const body = `You received ${data.pointsAwarded} points for your recent order.`;
+
+  for (const token of tokens) {
+    await this.notificationsService.sendPushNotification(
+      token.deviceToken,
+      title,
+      body,
+      { orderId: data.orderId },
+    );
+  }
+}
 
   // ====================================================================
   // HTTP ENDPOINTS
