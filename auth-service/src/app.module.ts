@@ -14,6 +14,7 @@ import { RestaurantsModule } from './modules/restaurants/restaurants.module';
 import { SharedModule } from './common/shared/shared.module';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
+import { AnalyticsModule } from './modules/Analytics/analytics.module';
 
 @Module({
   imports: [
@@ -50,7 +51,8 @@ import { join } from 'path';
     AuditModule,
     UsersModule,
     RestaurantsModule,
-    SharedModule
+    SharedModule,
+    AnalyticsModule, 
   ],
   providers: [KafkaProvider, MailerProvider],
   exports: [KafkaProvider, MailerProvider],

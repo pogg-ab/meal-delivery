@@ -105,7 +105,7 @@ export class OrdersService {
     });
   }
 
-  // In OrdersService.ts
+
 
 async unscheduleOrder(customerId: string, orderId: string): Promise<Order> {
     return await this.dataSource.transaction(async (manager) => {
@@ -437,7 +437,7 @@ async ownerResponse(ownerId: string, orderId: string, accepted: boolean, reason?
 
 
 
-// Called when payment.initiated event is received from PaymentService
+
 async handlePaymentInitiated(payload: any) {
   const orderId = payload?.order_id;
   if (!orderId) {
@@ -662,7 +662,7 @@ try {
   return;
 }
 
-// ensure the helper signature accepts string|number|null
+
 private maskPickupCode(code?: string | number | null): string | null {
   if (code === null || code === undefined) return null;
   const s = String(code);
@@ -670,9 +670,7 @@ private maskPickupCode(code?: string | number | null): string | null {
   return s.replace(/\d(?=\d{2})/g, '*'); // show last 2 digits
 }
 
-  /**
-   * Customer marks "coming".
-   */
+  
   async markCustomerComing(customerId: string, orderId: string, note?: string) {
     const order = await this.orderRepo.findOne({ where: { id: orderId } });
     if (!order) throw new NotFoundException('Order not found');
@@ -775,30 +773,38 @@ async markOrderPreparing(ownerId: string, orderId: string, note?: string) {
     const orderRepo = manager.getRepository(Order);
     const eventRepo = manager.getRepository(OrderEvent);
 
-    const order = await orderRepo.findOne({ where: { id: orderId }, relations: ['restaurant', 'items'] });
-    if (!order) throw new NotFoundException('Order not found');
-    if (!order.restaurant || order.restaurant.owner_id !== ownerId) throw new BadRequestException('Not authorized');
+    const order = await orderRepo.findOne({
+      where: { id: orderId },
+      relations: ['restaurant', 'items'],
+    });
 
-    // --- TEMPORARY BYPASS FOR TESTING ---
-    // The following block is commented out to allow moving an order to "PREPARING"
-    // without it first being "PAID". Remember to re-enable this for production.
-    /*
-    // Only allow preparing after payment is confirmed
-    if (order.status !== OrderStatus.PAID) {
-      throw new BadRequestException('Order cannot be marked preparing until payment is confirmed');
+    if (!order) {
+      throw new NotFoundException('Order not found');
     }
-    */
-    // --- END OF BYPASS ---
+    if (!order.restaurant || order.restaurant.owner_id !== ownerId) {
+      throw new BadRequestException('Not authorized');
+    }
+
+    // --- PAYMENT CHECK RESTORED ---
+    // This is the critical business rule for production.
+    if (order.status !== OrderStatus.PAID) {
+      throw new BadRequestException(
+        'Order cannot be marked preparing until payment is confirmed',
+      );
+    }
+    // --- END OF CHECK ---
 
     order.status = OrderStatus.PREPARING;
     await orderRepo.save(order);
 
-    await eventRepo.save(eventRepo.create({
-      order_id: order.id,
-      actor_id: ownerId,
-      action: 'OWNER_PREPARING',
-      meta: note ? { note } : undefined,
-    } as DeepPartial<OrderEvent>));
+    await eventRepo.save(
+      eventRepo.create({
+        order_id: order.id,
+        actor_id: ownerId,
+        action: 'OWNER_PREPARING',
+        meta: note ? { note } : undefined,
+      } as DeepPartial<OrderEvent>),
+    );
 
     // emit after commit
     return order;
@@ -806,7 +812,12 @@ async markOrderPreparing(ownerId: string, orderId: string, note?: string) {
     // Notify clients and other services
     this.gateway.emitOrderUpdated(committedOrder);
     try {
-      await this.kafka.emit('order.preparing', { order_id: committedOrder.id, restaurant_id: committedOrder.restaurant_id, customer_id: committedOrder.customer_id,  });
+      // --- USING THE IMPROVED KAFKA EVENT WITH customer_id ---
+      await this.kafka.emit('order.preparing', {
+        order_id: committedOrder.id,
+        restaurant_id: committedOrder.restaurant_id,
+        customer_id: committedOrder.customer_id, // This is essential for notifications
+      });
     } catch (e) {
       this.logger.warn('Kafka emit failed for order.preparing', e as any);
     }
@@ -876,19 +887,25 @@ async cancelOrder(customerId: string, orderId: string, reason?: string) {
       return { ok: true };
     });
   }
-  // Add this entire method inside the OrdersService class
+
 
 private async validateSchedulingTime(restaurantId: string, localDeliveryTimeStr: string): Promise<Date> {
-    const restaurantTimeZone = 'Africa/Addis_Ababa';
+    // First, fetch the restaurant so we can use its settings.
+    const restaurant = await this.restaurantRepo.findOneBy({ id: restaurantId });
+    if (!restaurant) {
+        throw new NotFoundException('Restaurant not found.');
+    }
 
-    // --- THE CORRECT FUNCTION NAME ---
-    // We are now using 'fromZonedTime' which we PROVED exists on the module.
+    const restaurantTimeZone = 'Africa/Addis_Ababa';
     const deliveryTimeUtc = dateFnsTz.fromZonedTime(localDeliveryTimeStr, restaurantTimeZone);
 
     this.logger.log(`Validating schedule for restaurant ${restaurantId}. Local time: ${localDeliveryTimeStr}, converted to UTC: ${deliveryTimeUtc.toISOString()}`);
 
-    // --- All other logic is correct and remains the same ---
-    const minLeadTimeMinutes = 45;
+    // --- LOGIC CHANGE IS HERE ---
+    // Instead of a hardcoded 45, we use the value from the restaurant entity.
+    const minLeadTimeMinutes = restaurant.minimumSchedulingLeadTimeMinutes;
+    // ----------------------------
+
     const now = new Date();
     const earliestAllowedTime = new Date(now.getTime() + minLeadTimeMinutes * 60000);
     if (deliveryTimeUtc < earliestAllowedTime) {
@@ -900,13 +917,8 @@ private async validateSchedulingTime(restaurantId: string, localDeliveryTimeStr:
     if (deliveryTimeUtc > latestAllowedTime) {
         throw new BadRequestException(`Orders cannot be scheduled more than ${maxScheduleDays} days in the future.`);
     }
-
-    const restaurant = await this.restaurantRepo.findOneBy({ id: restaurantId });
-    if (!restaurant) {
-        throw new NotFoundException('Restaurant not found.');
-    }
-
-    // 'formatInTimeZone' also exists and is correct.
+    
+    // The rest of the operating hours validation remains the same.
     const deliveryDayIndex = Number(dateFnsTz.formatInTimeZone(deliveryTimeUtc, restaurantTimeZone, 'i')) % 7;
     const deliveryTimeLocal = dateFnsTz.formatInTimeZone(deliveryTimeUtc, restaurantTimeZone, 'HH:mm:ss');
 
@@ -928,7 +940,7 @@ private async validateSchedulingTime(restaurantId: string, localDeliveryTimeStr:
         );
     }
 
-    this.logger.log(`Scheduling time validated successfully.`);
+    this.logger.log(`Scheduling time validated successfully for restaurant ${restaurantId} with a lead time of ${minLeadTimeMinutes} minutes.`);
 
     return deliveryTimeUtc;
 }
@@ -1007,7 +1019,7 @@ async getScheduledOrdersForRestaurant(ownerId: string, restaurantId: string, lim
   }
 
 
-// In catalog-service/src/modules/orders/order.service.ts
+
 
 async markAsComplete(ownerId: string, orderId: string): Promise<{ ok: boolean }> {
     const { committedOrder, pointsAwarded } = await this.dataSource.transaction(async (manager) => {

@@ -29,6 +29,9 @@ import { ResetPasswordDto } from './dtos/reset-password.dto';
 import { RefreshTokenDto } from './dtos/refresh-token.dto';
 import { Role } from '../../entities/Role.entity';
 import { UserRole } from '../../entities/User-role.entity';
+import { CustomerGrowthDto } from '../Analytics/dto/customer-growth.dto';
+import { CustomerGrowthQueryDto, TrendPeriod } from '../Analytics/dto/customer-growth-query.dto';
+import * as dayjs from 'dayjs';
 
 @Injectable()
 export class AuthService {
@@ -683,5 +686,38 @@ async resetPassword(dto: ResetPasswordDto) {
       this.logger?.error('Failed to delete customers', (err as any).stack || err);
       throw new InternalServerErrorException('Failed to delete customers. Please try again later.');
     }
+  }
+
+  async getCustomerGrowth(query: CustomerGrowthQueryDto): Promise<CustomerGrowthDto[]> {
+    this.logger.log(`Fetching customer growth data for period: ${query.period}`);
+
+    const days = query.period === TrendPeriod.WEEK ? 7 : query.period === TrendPeriod.QUARTER ? 90 : 30;
+    const startDate = dayjs().subtract(days - 1, 'day').startOf('day');
+
+    const dbResults = await this.userRepo
+      .createQueryBuilder('user')
+      .select("TO_CHAR(user.created_at, 'YYYY-MM-DD')", "date")
+      .addSelect("COUNT(user.user_id)::int", "signupCount")
+      .where("user.created_at >= :startDate", { startDate: startDate.toDate() })
+      .groupBy('date')
+      .orderBy('date', 'ASC')
+      .getRawMany();
+
+    // The database only returns days with activity. We need to fill in the gaps.
+    const resultsMap = new Map<string, number>();
+    for (const result of dbResults) {
+      resultsMap.set(result.date, result.signupCount);
+    }
+
+    const trends: CustomerGrowthDto[] = [];
+    for (let i = 0; i < days; i++) {
+      const date = startDate.add(i, 'day').format('YYYY-MM-DD');
+      trends.push({
+        date: date,
+        signupCount: resultsMap.get(date) || 0,
+      });
+    }
+
+    return trends;
   }
 }

@@ -14,10 +14,4 @@ export class AdminSummaryDto {
     example: 8550,
   })
   totalPlatformOrders: number;
-
-  @ApiProperty({
-    description: 'Total number of new customers who signed up in the last 30 days.',
-    example: 512,
-  })
-  newCustomerSignups: number;
 }

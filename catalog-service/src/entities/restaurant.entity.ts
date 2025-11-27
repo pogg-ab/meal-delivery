@@ -52,21 +52,25 @@ export class Restaurant {
   @Column()
   owner_id: string;
 
+  // --- NEW FIELD ADDED HERE ---
+  @Column({
+    type: 'integer',
+    default: 45,
+    comment: 'The minimum lead time in minutes required for a customer to schedule an order.',
+  })
+  minimumSchedulingLeadTimeMinutes: number;
+  // ---------------------------
+
   @Column({ default: false })
   is_active: boolean;
 
-  // --- MERGE RESOLUTION: KEPT BOTH SETS OF CHANGES ---
-
-  // *** START: Friend's changes for Reviews & Ratings ***
+  
   @Column({ type: 'decimal', precision: 3, scale: 2, nullable: true })
   average_rating: number | null;
 
   @Column({ type: 'integer', default: 0 })
   total_reviews: number;
-  // *** END: Friend's changes for Reviews & Ratings ***
-
-
-  // *** START: Your changes for Operating Hours ***
+  
   @Column({ type: 'time', nullable: true, comment: "Sunday opening time" })
   sunday_open: string;
 
@@ -108,8 +112,7 @@ export class Restaurant {
 
   @Column({ type: 'time', nullable: true, comment: "Saturday closing time" })
   saturday_close: string;
-  // *** END: Your changes for Operating Hours ***
-
+  
   @OneToMany(() => MenuCategory, (category) => category.restaurant)
   menu_categories: MenuCategory[];
 }

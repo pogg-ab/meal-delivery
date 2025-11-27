@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { Order, OrderStatus, Restaurant } from '../../entities/order.entity';
 import { RestaurantSummaryDto } from './dto/restaurant-summary.dto';
 import * as dayjs from 'dayjs';
@@ -33,6 +33,7 @@ export class AnalyticsService {
     private readonly orderItemRepository: Repository<OrderItem>,
     @InjectRepository(OrderEvent) private readonly orderEventRepository: Repository<OrderEvent>,
     @InjectRepository(Restaurant) private readonly restaurantRepository: Repository<Restaurant>,
+    private readonly dataSource: DataSource,
   ) {}
 
   async getRestaurantSummary(
@@ -323,44 +324,55 @@ export class AnalyticsService {
       .where('orders.status = :status', { status: OrderStatus.COMPLETED })
       .andWhere('orders.created_at >= :startDate', { startDate: thirtyDaysAgo })
       .getRawOne();
+      
+    // MODIFICATION: The 'newCustomerSignups' property has been removed.
     const summary = {
       totalPlatformRevenue: parseFloat(platformOrderStats.totalPlatformRevenue) || 0,
       totalPlatformOrders: platformOrderStats.totalPlatformOrders || 0,
-      newCustomerSignups: 0,
     };
+    
     await this.cacheManager.set(cacheKey, summary);
     return summary;
   }
 
-  async getTopRestaurants(query: TopItemsQueryDto): Promise<TopRestaurantDto[]> {
+ // REPLACE your old method with this new one
+async getTopRestaurants(query: TopItemsQueryDto): Promise<TopRestaurantDto[]> {
     const cacheKey = `analytics-top-restaurants-limit-${query.limit}`;
     const cachedData = await this.cacheManager.get(cacheKey);
     if (cachedData) {
-      this.logger.log(`Returning top restaurants from CACHE`);
-      return cachedData;
+        this.logger.log(`Returning top restaurants from CACHE`);
+        return cachedData;
     }
-    this.logger.log(`Fetching top ${query.limit} performing restaurants from DB`);
-    const thirtyDaysAgo = dayjs().subtract(30, 'days').toDate();
-    const rawResults = await this.orderRepository
-      .createQueryBuilder('orders')
-      .innerJoin('orders.restaurant', 'restaurant')
-      .select('restaurant.id', 'restaurantId')
-      .addSelect('restaurant.name', 'restaurantName')
-      .addSelect('SUM(orders.total_amount)', 'totalRevenue')
-      .where('orders.status = :status', { status: OrderStatus.COMPLETED })
-      .andWhere('orders.created_at >= :startDate', { startDate: thirtyDaysAgo })
-      .groupBy('restaurant.id, restaurant.name')
-      .orderBy('SUM(orders.total_amount)', 'DESC')
-      .limit(query.limit)
-      .getRawMany();
+    this.logger.log(`Fetching top ${query.limit} performing restaurants from MATERIALIZED VIEW`);
+
+    const thirtyDaysAgo = dayjs().subtract(30, 'days').format('YYYY-MM-DD');
+
+    // This query is now incredibly simple. It sums up pre-calculated daily totals.
+    const rawResults = await this.dataSource.query(`
+        SELECT
+            restaurant_id AS "restaurantId",
+            restaurant_name AS "restaurantName",
+            SUM(total_revenue) AS "totalRevenue"
+        FROM
+            mv_daily_restaurant_revenue
+        WHERE
+            summary_date >= $1
+        GROUP BY
+            restaurant_id, restaurant_name
+        ORDER BY
+            "totalRevenue" DESC
+        LIMIT $2;
+    `, [thirtyDaysAgo, query.limit]);
+
     const restaurants = rawResults.map(r => ({
-      restaurantId: r.restaurantId,
-      restaurantName: r.restaurantName,
-      totalRevenue: parseFloat(r.totalRevenue) || 0,
+        restaurantId: r.restaurantId,
+        restaurantName: r.restaurantName,
+        totalRevenue: parseFloat(r.totalRevenue || '0'),
     }));
+    
     await this.cacheManager.set(cacheKey, restaurants);
     return restaurants;
-  }
+}
 
   async getLowPerformingRestaurants(query: TopItemsQueryDto): Promise<TopRestaurantDto[]> {
     const cacheKey = `analytics-low-restaurants-limit-${query.limit}`;
