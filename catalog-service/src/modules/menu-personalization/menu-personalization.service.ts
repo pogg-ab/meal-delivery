@@ -87,6 +87,9 @@ export class MenuPersonalizationService {
       const rows = await this.rankingRepo
         .createQueryBuilder('rank')
         .innerJoinAndSelect('rank.menu_item', 'menu')
+        .leftJoinAndSelect('menu.category', 'category') // Join category
+        .leftJoinAndSelect('category.restaurant', 'restaurant') // Join restaurant via category
+        .where('rank.customer_id = :customerId', { customerId }) // Filter by customer
         .orderBy('rank.order_count', 'DESC')
         .take(limit)
         .getMany();
