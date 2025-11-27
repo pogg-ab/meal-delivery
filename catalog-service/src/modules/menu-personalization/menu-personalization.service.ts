@@ -1,7 +1,7 @@
 
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, Not, In } from 'typeorm';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 
@@ -95,6 +95,31 @@ export class MenuPersonalizationService {
         .getMany();
 
       const menuItems = rows.map((r) => r.menu_item);
+
+      // --- FALLBACK LOGIC ---
+      // If we have fewer items than the limit, fill the rest with top-rated items
+      if (menuItems.length < limit) {
+        const remaining = limit - menuItems.length;
+        const existingIds = menuItems.map((i) => i.id);
+
+        try {
+          const fallbackItems = await this.menuItemRepo.find({
+            where: {
+              is_available: true,
+              // Exclude items already in the personalized list
+              ...(existingIds.length > 0 ? { id: Not(In(existingIds)) } : {}),
+            },
+            order: { average_rating: 'DESC', total_reviews: 'DESC' },
+            take: remaining,
+            relations: ['category', 'category.restaurant'],
+          });
+
+          menuItems.push(...fallbackItems);
+        } catch (fallbackErr) {
+          this.logger.warn('Failed to fetch fallback menu items', fallbackErr as any);
+        }
+      }
+      // --- END FALLBACK LOGIC ---
 
       // store in cache (ttl in seconds). cache-manager supports third arg as ttl or options object depending on store
       try {
