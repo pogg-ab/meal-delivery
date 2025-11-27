@@ -21,7 +21,10 @@ export class MenuPersonalizationController {
 
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth('access-token')
-@ApiOperation({ summary: 'Get globally personalized menu for the customer' })
+@ApiOperation({ 
+  summary: 'Get globally personalized menu for the customer',
+  description: 'Returns a list of menu items ranked by the customer\'s order history, including restaurant details.',
+})
 @Get('/global')
 async getGlobalMenu(@Req() req: any, @Query() query: GetPersonalizedMenuDto) {
   const customerId = req.user?.userId;
