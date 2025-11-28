@@ -429,6 +429,37 @@ async getRestaurantDocument(
             };
         }
 
+async checkDocumentAccess(
+            restaurantId: string,
+            documentType: string,
+            user: AuthenticatedUser,
+        ): Promise<void> {
+            // --- Authorization Logic ---
+            const isAdmin = user.roles.includes('platform_admin');
+            const isOwner = user.roles.includes('restaurant_owner');
+
+            // Rule: If the user is an owner, they can only access their own restaurant's documents.
+            if (isOwner && !isAdmin && user.restaurantId !== restaurantId) {
+                throw new ForbiddenException('You do not have permission to view documents for this restaurant.');
+            }
+
+            // Check if the document exists
+            const document = await this.documentRepository.findOne({
+                where: { restaurant_id: restaurantId, document_type: documentType },
+            });
+
+            if (!document || !document.document_url) {
+                throw new NotFoundException(`Document of type ${documentType} for restaurant ${restaurantId} not found.`);
+            }
+
+            const filePath = document.document_url;
+            const fullPath = path.join(process.cwd(), filePath);
+            
+            if (!fs.existsSync(fullPath)) {
+                throw new NotFoundException(`File for document not found on server.`);
+            }
+        }
+
 
 async checkOwnerStatus(ownerId: string, restaurantId: string): Promise<{ status: RestaurantStatus; rejection_reason: string | null }> {
   const restaurant = await this.restaurantRepository.findOneBy({ id: restaurantId });

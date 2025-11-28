@@ -15,11 +15,8 @@ import {
   FileTypeValidator,
   Get,
   ClassSerializerInterceptor,
-  Res,
-  StreamableFile,
   Query,
 } from '@nestjs/common';
-import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { RestaurantsService } from './restaurants.service';
 import { RegisterRestaurantDto } from './dto/register-restaurant.dto';
@@ -32,8 +29,6 @@ import { Roles } from 'src/common/decorators/roles.decorator';
 import { UpdateRestaurantDto } from './dto/update-restaurant.dto';
 import { RestaurantProfileDto } from './dto/restaurant-profile.dto';
 import { Restaurant } from 'src/entities/restaurant.entity';
-import { createReadStream } from 'fs';
-import { join } from 'path';
 import { UpdateHoursDto } from './dto/update-hours.dto';
 import { UpdateAddressDto } from './dto/update-address.dto';
 import { BankDetailsDto } from './dto/bank-details.dto';
@@ -162,32 +157,35 @@ updateProfile(
   @Roles('platform_admin', 'restaurant_owner')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @ApiBearerAuth('access-token')
-  @ApiOperation({ summary: 'Get a restaurant verification document (Admin or Owner of the restaurant)' })
+  @ApiOperation({ summary: 'Get a restaurant verification document URL (Admin or Owner of the restaurant)' })
+  @ApiResponse({
+    status: 200,
+    description: 'Document URL retrieved successfully.',
+    schema: {
+      type: 'object',
+      properties: {
+        url: {
+          type: 'string',
+          example: 'https://mealsystem.basirahtv.com/auth/restaurants/uuid/documents/BUSINESS_LICENSE'
+        }
+      }
+    }
+  })
   async getRestaurantDocument(
     @Param('id') restaurantId: string,
     @Param('documentType') documentType: string,
-    @Res({ passthrough: true }) res: Response,
     @Req() req, // Pass the request to get the user
-  ): Promise<StreamableFile> {
+  ): Promise<{ url: string }> {
     const user: AuthenticatedUser = req.user; // Extract the user payload
 
-    // Pass the user to the service for fine-grained authorization
-    const fileDetails = await this.restaurantsService.getRestaurantDocument(
-      restaurantId,
-      documentType,
-      user, 
-    );
+    // Pass the user to the service for authorization check
+    await this.restaurantsService.checkDocumentAccess(restaurantId, documentType, user);
 
-    const fileStream = createReadStream(
-      join(process.cwd(), fileDetails.filePath),
-    );
+    // Construct the full URL
+    const baseUrl = process.env.API_BASE_URL || 'http://localhost:8000';
+    const url = `${baseUrl}/restaurants/${restaurantId}/documents/${documentType}`;
 
-    res.set({
-      'Content-Type': fileDetails.mimetype,
-      'Content-Disposition': `inline; filename="${fileDetails.originalName}"`,
-    });
-
-    return new StreamableFile(fileStream);
+    return { url };
   }
 
 @Get(':id/status')
