@@ -186,7 +186,14 @@ updateProfile(
     if (format === 'json') {
       // Return JSON with URL
       const baseUrl = process.env.API_BASE_URL || 'http://localhost:8000';
-      const url = `${baseUrl}/restaurants/${restaurantId}/documents/${documentType}`;
+      let url = `${baseUrl}/restaurants/${restaurantId}/documents/${documentType}`;
+
+      // Append the current token to the URL so it can be accessed directly
+      if (req.headers.authorization) {
+        const token = req.headers.authorization.replace('Bearer ', '');
+        url += `?token=${token}`;
+      }
+
       return { url };
     } else {
       // Serve the file
