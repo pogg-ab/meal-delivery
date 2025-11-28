@@ -188,7 +188,8 @@ export class RestaurantsService {
         // --- End of unchanged part ---
 
         // --- 2. Construct and return the full API URL ---
-        const documentUrl = `${process.env.API_BASE_URL}/restaurants/${restaurantId}/documents/${uploadDto.document_type}`;
+        const baseUrl = process.env.API_BASE_URL || 'http://localhost:8000';
+        const documentUrl = `${baseUrl}/restaurants/${restaurantId}/documents/${uploadDto.document_type}`;
 
         return { url: documentUrl };
     }
@@ -376,7 +377,7 @@ async findForReviewByStatus(statuses: string[]): Promise<Restaurant[]> {
         return [];
       }
 
-      return this.restaurantRepository.find({
+      const restaurants = await this.restaurantRepository.find({
         where: {
           status: In(validStatuses),
         },
@@ -385,6 +386,8 @@ async findForReviewByStatus(statuses: string[]): Promise<Restaurant[]> {
           updated_at: 'ASC',
         },
       });
+
+      return restaurants.map(restaurant => this.transformRestaurantDocuments(restaurant));
     }
 
 async getRestaurantDocument(
@@ -460,7 +463,7 @@ async getRestaurantProfileByOwnerId(ownerId: string): Promise<Restaurant> {
             throw new NotFoundException('No restaurant profile found for the current user.');
         }
 
-        return restaurant;
+        return this.transformRestaurantDocuments(restaurant);
     }
 
 
@@ -558,4 +561,14 @@ async upsertBankDetails(
 
   return this.bankDetailRepository.save(bankDetail);
 }
+
+    private transformRestaurantDocuments(restaurant: Restaurant): Restaurant {
+        if (restaurant.documents) {
+            const baseUrl = process.env.API_BASE_URL || 'http://localhost:8000';
+            restaurant.documents.forEach(doc => {
+                doc.document_url = `${baseUrl}/restaurants/${restaurant.id}/documents/${doc.document_type}`;
+            });
+        }
+        return restaurant;
+    }
 }
