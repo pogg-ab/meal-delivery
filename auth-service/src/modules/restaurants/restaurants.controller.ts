@@ -25,7 +25,7 @@ import { RestaurantsService } from './restaurants.service';
 import { RegisterRestaurantDto } from './dto/register-restaurant.dto';
 import { UploadDocumentDto } from './dto/upload-document.dto';
 import { UpdateRestaurantStatusDto } from './dto/update-restaurant-status.dto';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes, ApiBody, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes, ApiBody, ApiResponse, ApiOkResponse, ApiExcludeEndpoint } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
@@ -162,18 +162,22 @@ updateProfile(
   @Roles('platform_admin', 'restaurant_owner')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @ApiBearerAuth('access-token')
-  @ApiOperation({ summary: 'Get a restaurant verification document (Admin or Owner of the restaurant). Use ?format=json for URL only.' })
-  @ApiResponse({
-    status: 200,
-    description: 'Document served or URL returned based on format param.',
+  @ApiOperation({ summary: 'Get a restaurant verification document (Admin or Owner of the restaurant).' })
+  @ApiOkResponse({
+    description: 'JSON containing a loadable URL for the document. The URL is signed with a token, use it in a browser or app to load the document.',
+    schema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', example: 'https://mealsystem.basirahtv.com/auth/restaurants/{id}/documents/{type}/file?token=...' },
+      },
+    },
   })
   async getRestaurantDocument(
     @Param('id') restaurantId: string,
     @Param('documentType') documentType: string,
-    @Query('format') format: string,
     @Req() req,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<StreamableFile | { url: string }> {
+  ): Promise<{ url: string }> {
     const user: AuthenticatedUser = req.user;
 
     // Pass the user to the service for fine-grained authorization
@@ -183,31 +187,48 @@ updateProfile(
       user,
     );
 
-    if (format === 'json') {
-      // Return JSON with URL
-      const baseUrl = process.env.API_BASE_URL || 'http://localhost:8000';
-      let url = `${baseUrl}/restaurants/${restaurantId}/documents/${documentType}`;
+    // Default response: JSON pointing to the *file* endpoint (hidden in Swagger)
+    const baseUrl = process.env.API_BASE_URL || 'http://localhost:8000';
+    let url = `${baseUrl}/restaurants/${restaurantId}/documents/${documentType}/file`;
 
-      // Append the current token to the URL so it can be accessed directly
-      if (req.headers.authorization) {
-        const token = req.headers.authorization.replace('Bearer ', '');
-        url += `?token=${token}`;
-      }
-
-      return { url };
-    } else {
-      // Serve the file
-      const fileStream = createReadStream(
-        join(process.cwd(), fileDetails.filePath),
-      );
-
-      res.set({
-        'Content-Type': fileDetails.mimetype,
-        'Content-Disposition': `inline; filename="${fileDetails.originalName}"`,
-      });
-
-      return new StreamableFile(fileStream);
+    // Append token to URL for direct access in browsers/apps
+    if (req.headers.authorization) {
+      const token = (req.headers.authorization as string).replace('Bearer ', '');
+      url += `?token=${token}`;
+    } else if (req.query && req.query.token) {
+      url += `?token=${req.query.token}`;
     }
+
+    return { url };
+  }
+
+  // File stream endpoint (hidden from Swagger docs; used directly via the signed URL)
+  @Get(':id/documents/:documentType/file')
+  @ApiExcludeEndpoint()
+  @Roles('platform_admin', 'restaurant_owner')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Hidden: Serve document file content (use the signed URL returned by the JSON endpoint).' })
+  async serveRestaurantDocument(
+    @Param('id') restaurantId: string,
+    @Param('documentType') documentType: string,
+    @Req() req,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const user: AuthenticatedUser = req.user;
+
+    const fileDetails = await this.restaurantsService.getRestaurantDocument(
+      restaurantId,
+      documentType,
+      user,
+    );
+
+    const fileStream = createReadStream(join(process.cwd(), fileDetails.filePath));
+    res.set({
+      'Content-Type': fileDetails.mimetype,
+      'Content-Disposition': `inline; filename="${fileDetails.originalName}"`,
+    });
+    return new StreamableFile(fileStream);
   }
 
 @Get(':id/status')
