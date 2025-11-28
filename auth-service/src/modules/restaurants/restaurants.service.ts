@@ -189,7 +189,7 @@ export class RestaurantsService {
 
         // --- 2. Construct and return the full API URL ---
         const baseUrl = process.env.API_BASE_URL || 'http://localhost:8000';
-        const documentUrl = `${baseUrl}/restaurants/${restaurantId}/documents/${uploadDto.document_type}`;
+        const documentUrl = `${baseUrl}/restaurants/${restaurantId}/documents/${uploadDto.document_type}/file`;
 
         return { url: documentUrl };
     }
@@ -597,7 +597,7 @@ async upsertBankDetails(
         if (restaurant.documents) {
             const baseUrl = process.env.API_BASE_URL || 'http://localhost:8000';
             restaurant.documents.forEach(doc => {
-                doc.document_url = `${baseUrl}/restaurants/${restaurant.id}/documents/${doc.document_type}`;
+              doc.document_url = `${baseUrl}/restaurants/${restaurant.id}/documents/${doc.document_type}/file`;
             });
         }
         return restaurant;
