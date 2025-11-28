@@ -3,12 +3,18 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ScheduleModule } from '@nestjs/schedule'; // <-- 1. IMPORT SCHEDULE MODULE
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { UserDeviceToken } from './entities/user-device-token.entity';
+import { SchedulerModule } from './modules/scheduler/scheduler.module'; // <-- 2. IMPORT OUR NEW SCHEDULER MODULE
 const { SnakeNamingStrategy } = require('typeorm-naming-strategies');
 
 @Module({
   imports: [
+    // --- Additions Start Here ---
+    ScheduleModule.forRoot(), // <-- 3. ACTIVATE THE SCHEDULING SYSTEM
+    // --- Additions End Here ---
+
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
@@ -25,13 +31,11 @@ const { SnakeNamingStrategy } = require('typeorm-naming-strategies');
         database: configService.get<string>('POSTGRES_DB'),
         entities: [UserDeviceToken],
         namingStrategy: new SnakeNamingStrategy(),
-        
-        // --- THIS IS THE KEY CHANGE ---
-        // It automatically creates/updates tables to match your entities.
         synchronize: true, 
       }),
     }),
     NotificationsModule,
+    SchedulerModule, // <-- 4. REGISTER OUR NEW MODULE
   ],
   controllers: [],
   providers: [],

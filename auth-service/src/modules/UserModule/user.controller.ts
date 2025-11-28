@@ -17,6 +17,7 @@ import { Permissions } from '../../common/decorators/permission.decorator';
 import { AssignRoleDto } from './dto/assign-role.dto';
 import { ApiTags, ApiOperation, ApiBody, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { UserDto } from './dto/user.dto';
+import { Public } from 'src/common/decorators/public.decorator';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionGuard)
@@ -64,5 +65,17 @@ export class UsersController {
   @ApiResponse({ status: 200, description: 'Assignment result' })
   assignRole(@Param('id') id: string, @Body() dto: AssignRoleDto) {
     return this.usersService.assignRole(id, dto);
+  }
+
+  @Public() 
+  @Get('internal/customers')
+  @ApiOperation({ 
+    summary: 'Get all customer users (FOR INTERNAL USE ONLY)',
+    description: 'Provides a list of users with the customer role for other microservices.'
+  })
+  @ApiResponse({ status: 200, type: [UserDto] })
+  getInternalCustomerUsers() {
+    // We will now create the 'findByRole' method in the UsersService
+    return this.usersService.findByRole('customer');
   }
 }

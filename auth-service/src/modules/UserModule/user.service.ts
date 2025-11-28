@@ -118,4 +118,16 @@ export class UsersService {
     return { message: 'Role removed successfully' };
   }
 
+  async findByRole(roleName: string): Promise<{ id: string }[]> {
+    const users = await this.usersRepo.createQueryBuilder('user')
+      .innerJoin('user.roles', 'userRole')
+      .innerJoin('userRole.role', 'role')
+      .where('role.name = :roleName', { roleName })
+      .getMany();
+
+    
+    return users.map(user => ({
+      id: user.user_id,
+    }));
+  }
 }
