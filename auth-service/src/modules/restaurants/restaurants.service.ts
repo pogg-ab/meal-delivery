@@ -188,7 +188,8 @@ export class RestaurantsService {
         // --- End of unchanged part ---
 
         // --- 2. Construct and return the full API URL ---
-        const documentUrl = `${process.env.API_BASE_URL}/restaurants/${restaurantId}/documents/${uploadDto.document_type}`;
+        const baseUrl = process.env.API_BASE_URL || 'http://localhost:8000';
+        const documentUrl = `${baseUrl}/restaurants/${restaurantId}/documents/${uploadDto.document_type}/file`;
 
         return { url: documentUrl };
     }
@@ -376,7 +377,7 @@ async findForReviewByStatus(statuses: string[]): Promise<Restaurant[]> {
         return [];
       }
 
-      return this.restaurantRepository.find({
+      const restaurants = await this.restaurantRepository.find({
         where: {
           status: In(validStatuses),
         },
@@ -385,6 +386,8 @@ async findForReviewByStatus(statuses: string[]): Promise<Restaurant[]> {
           updated_at: 'ASC',
         },
       });
+
+      return restaurants.map(restaurant => this.transformRestaurantDocuments(restaurant));
     }
 
 async getRestaurantDocument(
@@ -426,6 +429,37 @@ async getRestaurantDocument(
             };
         }
 
+async checkDocumentAccess(
+            restaurantId: string,
+            documentType: string,
+            user: AuthenticatedUser,
+        ): Promise<void> {
+            // --- Authorization Logic ---
+            const isAdmin = user.roles.includes('platform_admin');
+            const isOwner = user.roles.includes('restaurant_owner');
+
+            // Rule: If the user is an owner, they can only access their own restaurant's documents.
+            if (isOwner && !isAdmin && user.restaurantId !== restaurantId) {
+                throw new ForbiddenException('You do not have permission to view documents for this restaurant.');
+            }
+
+            // Check if the document exists
+            const document = await this.documentRepository.findOne({
+                where: { restaurant_id: restaurantId, document_type: documentType },
+            });
+
+            if (!document || !document.document_url) {
+                throw new NotFoundException(`Document of type ${documentType} for restaurant ${restaurantId} not found.`);
+            }
+
+            const filePath = document.document_url;
+            const fullPath = path.join(process.cwd(), filePath);
+            
+            if (!fs.existsSync(fullPath)) {
+                throw new NotFoundException(`File for document not found on server.`);
+            }
+        }
+
 
 async checkOwnerStatus(ownerId: string, restaurantId: string): Promise<{ status: RestaurantStatus; rejection_reason: string | null }> {
   const restaurant = await this.restaurantRepository.findOneBy({ id: restaurantId });
@@ -460,7 +494,7 @@ async getRestaurantProfileByOwnerId(ownerId: string): Promise<Restaurant> {
             throw new NotFoundException('No restaurant profile found for the current user.');
         }
 
-        return restaurant;
+        return this.transformRestaurantDocuments(restaurant);
     }
 
 
@@ -558,4 +592,14 @@ async upsertBankDetails(
 
   return this.bankDetailRepository.save(bankDetail);
 }
+
+    private transformRestaurantDocuments(restaurant: Restaurant): Restaurant {
+        if (restaurant.documents) {
+            const baseUrl = process.env.API_BASE_URL || 'http://localhost:8000';
+            restaurant.documents.forEach(doc => {
+              doc.document_url = `${baseUrl}/restaurants/${restaurant.id}/documents/${doc.document_type}/file`;
+            });
+        }
+        return restaurant;
+    }
 }
