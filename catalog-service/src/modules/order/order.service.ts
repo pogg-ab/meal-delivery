@@ -629,7 +629,23 @@ try {
     } catch (kErr) {
       this.logger.warn('Failed emitting order.pickup_created', kErr as any);
       }
+
+      try {
+          if (pickupCodePrimitive) {
+            await this.kafka.emit('notification.order.paid_with_pickup', {
+              customerId: order.customer_id,
+              orderId: order.id,
+              pickupCode: pickupCodePrimitive.toString(), // Ensure it's a string
+              restaurantName: order.restaurant?.name ?? 'Your Restaurant', // Safely access restaurant name
+            });
+            this.logger.log(`Emitted notification.order.paid_with_pickup for order ${order.id}`);
+          }
+        } catch (notificationErr) {
+          this.logger.warn('Failed emitting notification.order.paid_with_pickup', notificationErr as any);
+        }
+
      }
+
    } catch (pickupErr) {
     this.logger.warn('Failed to issue pickup after payment', pickupErr?.message ?? pickupErr);
   }
@@ -785,14 +801,13 @@ async markOrderPreparing(ownerId: string, orderId: string, note?: string) {
       throw new BadRequestException('Not authorized');
     }
 
-    // --- PAYMENT CHECK RESTORED ---
-    // This is the critical business rule for production.
+    
     if (order.status !== OrderStatus.PAID) {
       throw new BadRequestException(
         'Order cannot be marked preparing until payment is confirmed',
       );
     }
-    // --- END OF CHECK ---
+
 
     order.status = OrderStatus.PREPARING;
     await orderRepo.save(order);
@@ -1026,7 +1041,13 @@ async markAsComplete(ownerId: string, orderId: string): Promise<{ ok: boolean }>
       const orderRepo = manager.getRepository(Order);
       const eventRepo = manager.getRepository(OrderEvent);
 
-      const order = await orderRepo.findOne({ where: { id: orderId }, relations: ['restaurant'] });
+      // ▼▼▼ CHANGE #1: ADD 'items' TO THE RELATIONS HERE ▼▼▼
+      const order = await orderRepo.findOne({ 
+        where: { id: orderId }, 
+        relations: ['restaurant', 'items'] 
+      });
+      // ▲▲▲ END OF CHANGE #1 ▲▲▲
+
       if (!order) {
         throw new NotFoundException('Order not found');
       }
@@ -1055,26 +1076,32 @@ async markAsComplete(ownerId: string, orderId: string): Promise<{ ok: boolean }>
 
     // --- AFTER TRANSACTION ---
     
-    // --- ADDED FOR DEBUGGING ---
     this.logger.log(`Transaction complete. Value of pointsAwarded is: ${pointsAwarded}`);
 
-    // 1. WebSocket update
+    // 1. WebSocket update (Unchanged)
     this.gateway.emitOrderUpdated(committedOrder);
 
     // 2. 'order.completed' event
     try {
+      // ▼▼▼ CHANGE #2: ADD THE 'items' ARRAY TO THE PAYLOAD ▼▼▼
       await this.kafka.emit('order.completed', {
         order_id: committedOrder.id,
         restaurant_id: committedOrder.restaurant_id,
         customer_id: committedOrder.customer_id,
         total_amount: committedOrder.total_amount,
         completed_at: new Date().toISOString(),
+        // This is the crucial addition for the inventory service
+        items: committedOrder.items.map(item => ({
+          menuItemId: item.menu_item_id,
+          quantity: item.quantity,
+        })),
       });
+      // ▲▲▲ END OF CHANGE #2 ▲▲▲
     } catch (e) {
       this.logger.warn('Kafka emit failed for order.completed', e as any);
     }
     
-    // 3. NEW Reward notification event
+    // 3. Reward notification event (Unchanged)
     try {
       if (pointsAwarded > 0) {
         this.logger.log(`Condition met (pointsAwarded > 0). Emitting reward.points.earned event...`);

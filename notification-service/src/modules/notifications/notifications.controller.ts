@@ -14,6 +14,7 @@ import { OrderCompletedEvent } from './dto/order-completed.event';
 import { OrderCancelledEvent } from './dto/order-cancelled.event';
 import { OrderScheduleDueEvent } from './dto/order-schedule-due.event';
 import { RewardPointsEarnedEvent } from './dto/reward-points-earned.event';
+import { OrderPaidWithPickupEvent } from './dto/order-paid-with-pickup.event';
 
 // --- Define the shape of the new Kafka event payload ---
 class LowStockEvent {
@@ -257,6 +258,11 @@ async handleRewardPointsEarned(@Payload() data: RewardPointsEarnedEvent) {
       { orderId: data.orderId },
     );
   }
+}
+@EventPattern('notification.order.paid_with_pickup')
+async handleOrderPaid(@Payload() payload: OrderPaidWithPickupEvent) {
+  this.logger.log(`Received order paid event with pickup code: ${JSON.stringify(payload)}`);
+  return this.notificationsService.handleOrderPaidWithPickup(payload);
 }
 
   // ====================================================================

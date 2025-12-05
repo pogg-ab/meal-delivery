@@ -30,7 +30,10 @@ export class SchedulerService {
   /**
    * Runs every day at 11:30 AM server time.
    */
-  @Cron('30 11 * * *', { name: 'lunch_notifications' }) 
+   @Cron('30 11 * * *', { 
+    name: 'lunch_notifications',
+    timeZone: 'Africa/Addis_Ababa', 
+  })
   async handleLunchtimeNotifications() {
     this.logger.log('Executing Lunchtime Promotional Notifications Cron Job...');
     
@@ -46,7 +49,10 @@ export class SchedulerService {
   /**
    * Runs every day at 6:00 PM (18:00) server time.
    */
-  @Cron(CronExpression.EVERY_DAY_AT_6PM, { name: 'dinner_notifications' })
+  @Cron(CronExpression.EVERY_DAY_AT_6PM, { 
+    name: 'dinner_notifications',
+    timeZone: 'Africa/Addis_Ababa', 
+  })
   async handleDinnertimeNotifications() {
     this.logger.log('Executing Dinner Promotional Notifications Cron Job...');
     

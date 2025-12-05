@@ -11,6 +11,7 @@ import { UserDeviceToken } from '../../entities/user-device-token.entity';
 import { RegisterDeviceTokenDto } from './dto/register-device-token.dto';
 import * as admin from 'firebase-admin'; // <-- Import firebase-admin
 import { SendBatchNotificationDto } from './dto/send-batch-notification.dto';
+import { OrderPaidWithPickupEvent } from './dto/order-paid-with-pickup.event';
 
 @Injectable()
 export class NotificationsService {
@@ -142,4 +143,23 @@ async findTokensByUserId(userId: string): Promise<UserDeviceToken[]> {
       totalTokens: tokens.length,
     };
   }
+
+  async handleOrderPaidWithPickup(payload: OrderPaidWithPickupEvent) {
+  const { customerId, orderId, pickupCode, restaurantName } = payload;
+
+  const userDevices = await this.findTokensByUserId(customerId);
+
+  if (userDevices.length === 0) {
+    this.logger.warn(`No device tokens found for customer ${customerId}. Cannot send 'order paid' notification.`);
+    return;
+  }
+
+  const title = `Your order at ${restaurantName} is confirmed!`;
+  const body = `Your payment was successful. Your pickup code is: ${pickupCode}`;
+  const data = { orderId, type: 'ORDER_PAID_WITH_PICKUP' }; // Data for deep-linking
+
+  for (const device of userDevices) {
+    await this.sendPushNotification(device.deviceToken, title, body, data);
+  }
+}
 }
