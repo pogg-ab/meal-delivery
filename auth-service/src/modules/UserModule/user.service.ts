@@ -1,7 +1,7 @@
 
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, Repository } from 'typeorm';
+import { EntityManager, Not, Repository } from 'typeorm';
 import { User } from '../../entities/User.entity';
 import { UserRole } from '../../entities/User-role.entity';
 import { Role } from '../../entities/Role.entity';
@@ -9,6 +9,9 @@ import { AuditLog } from '../../entities/Audit-log.entity';
 import { AssignRoleDto } from './dto/assign-role.dto';
 import { plainToInstance } from 'class-transformer';
 import { UserDto } from './dto/user.dto';
+import { ChangePasswordDto } from '../AuthModule/dtos/change-password.dto';
+import * as bcrypt from 'bcrypt';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 
 @Injectable()
 export class UsersService {
@@ -130,4 +133,94 @@ export class UsersService {
       id: user.user_id,
     }));
   }
+
+async changePassword(userId: string, dto: ChangePasswordDto): Promise<void> {
+  // 1. Find the user by their ID
+  const user = await this.usersRepo.findOneBy({ user_id: userId });
+  if (!user) {
+    throw new NotFoundException('User not found');
+  }
+
+  // 2. Verify their current password is correct
+  const isPasswordMatching = await bcrypt.compare(
+    dto.oldPassword,
+    user.password_hash,
+  );
+
+  if (!isPasswordMatching) {
+    throw new UnauthorizedException('Incorrect old password');
+  }
+
+  // 3. Hash and update the new password
+  const newHash = await bcrypt.hash(dto.newPassword, 10);
+  user.password_hash = newHash;
+
+  await this.usersRepo.save(user);
+
+  // 4. Create an audit log entry
+  await this.auditRepo.save(
+    this.auditRepo.create({
+      user_id: userId,
+      action: `CHANGE_PASSWORD`,
+      metadata: { changedAt: new Date() },
+    }),
+  );
+}
+
+async updateProfile(userId: string, dto: UpdateProfileDto): Promise<UserDto> {
+  const user = await this.usersRepo.findOneBy({ user_id: userId });
+  if (!user) {
+    throw new NotFoundException('User not found');
+  }
+
+  // --- Check for uniqueness before updating ---
+  if (dto.username && dto.username !== user.username) {
+    const existing = await this.usersRepo.findOne({
+      where: { username: dto.username, user_id: Not(userId) },
+    });
+    if (existing) {
+      throw new BadRequestException('Username is already in use.');
+    }
+  }
+
+  if (dto.phone && dto.phone !== user.phone) {
+    const existing = await this.usersRepo.findOne({
+      where: { phone: dto.phone, user_id: Not(userId) },
+    });
+    if (existing) {
+      throw new BadRequestException('Phone number is already in use.');
+    }
+  }
+
+  const oldValues = { username: user.username, phone: user.phone };
+  const changes = {};
+
+  // --- Apply changes ---
+  if (dto.username) {
+    user.username = dto.username;
+    changes['username'] = { from: oldValues.username, to: dto.username };
+  }
+  if (dto.phone) {
+    user.phone = dto.phone;
+    changes['phone'] = { from: oldValues.phone, to: dto.phone };
+  }
+
+  const updatedUser = await this.usersRepo.save(user);
+
+  // --- Create an audit log for the changes ---
+  if (Object.keys(changes).length > 0) {
+    await this.auditRepo.save(
+      this.auditRepo.create({
+        user_id: userId,
+        action: `UPDATE_PROFILE`,
+        metadata: { changes },
+      }),
+    );
+  }
+
+  // Return the updated user, serialized as a DTO to hide sensitive info
+  return plainToInstance(UserDto, updatedUser, {
+    excludeExtraneousValues: true,
+  });
+}
 }

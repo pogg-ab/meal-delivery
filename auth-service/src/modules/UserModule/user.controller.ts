@@ -8,6 +8,7 @@ import {
   UsePipes,
   ValidationPipe,
   Req,
+  Patch,
 } from '@nestjs/common';
 import { UsersService } from './user.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -18,12 +19,26 @@ import { AssignRoleDto } from './dto/assign-role.dto';
 import { ApiTags, ApiOperation, ApiBody, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { UserDto } from './dto/user.dto';
 import { Public } from 'src/common/decorators/public.decorator';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionGuard)
 @ApiTags('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
+
+  @Patch('me')
+@ApiBearerAuth('access-token')
+@ApiOperation({ summary: "Update authenticated user's profile" })
+@ApiResponse({ status: 200, type: UserDto, description: 'Profile updated successfully' })
+@ApiResponse({ status: 400, description: 'Username or phone number already in use' })
+async updateProfile(
+  @Req() req: any,
+  @Body() dto: UpdateProfileDto,
+): Promise<UserDto> {
+  const userId = req.user.userId;
+  return this.usersService.updateProfile(userId, dto);
+}
 
   @Get()
   @ApiBearerAuth('access-token')

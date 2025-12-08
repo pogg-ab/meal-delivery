@@ -1,5 +1,5 @@
 
-import { Controller, Post, Body, Req, UseGuards, HttpStatus, HttpCode, Delete, Param } from '@nestjs/common';
+import { Controller, Post, Body, Req, UseGuards, HttpStatus, HttpCode, Delete, Param, Patch } from '@nestjs/common';
 import { Request } from 'express';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiBody, ApiParam } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
@@ -17,11 +17,15 @@ import { ForgotPasswordDto } from './dtos/forgot-password.dto';
 import { ResetPasswordDto } from './dtos/reset-password.dto';
 import { DeleteUserParamsDto } from './dtos/delete-user.dto';
 import { DeleteAllCustomersDto } from './dtos/delete-all-user.dto';
+import { ChangePasswordDto } from './dtos/change-password.dto';
+import { UsersService } from '../UserModule/user.service';
 
 @ApiTags('Auth') // Groups under "Auth"
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(private readonly authService: AuthService,
+     private readonly usersService: UsersService,
+  ) {}
 
   @Post('register')
   @ApiOperation({ summary: 'Register a new user - Enter Full name' })
@@ -101,11 +105,21 @@ async login(@Body() dto: LoginDto, @Req() req: Request): Promise<LoginResponseDt
     return this.authService.resetPassword(dto);
   }
 
-//Endpoints for testing ----  TESTING
-  /**
-   * DELETE /users/:id
-   * Deletes a single user only if they have the "customer" role.
-   */
+@Patch('change-password')
+@UseGuards(JwtAuthGuard)
+@HttpCode(HttpStatus.OK)
+@ApiBearerAuth('access-token')
+@ApiOperation({ summary: 'Change authenticated user password' })
+async changePassword(
+  @Req() req: any,
+  @Body() changePasswordDto: ChangePasswordDto,
+) {
+  const userId = req.user.userId;
+  await this.usersService.changePassword(userId, changePasswordDto);
+
+  return { message: 'Password changed successfully' };
+}
+
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete a customer by id' })

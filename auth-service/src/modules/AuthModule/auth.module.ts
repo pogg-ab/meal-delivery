@@ -13,20 +13,22 @@ import { KafkaProvider } from '../../providers/kafka.provider';
 import { MailerProvider } from '../../providers/mailer.provider';
 import { Role } from '../../entities/Role.entity';
 import { UserRole } from '../../entities/User-role.entity';
+import { UsersModule } from '../UserModule/user.module';
 
 
 @Module({
-imports: [
-TypeOrmModule.forFeature([User, RefreshToken, OtpVerification,Role, UserRole]),
-PassportModule.register({ defaultStrategy: 'jwt' }),
-JwtModule.register({
-secret: process.env.JWT_SECRET || 'supersecret',
-signOptions: { expiresIn: process.env.JWT_EXPIRES_IN || '15m' },
-}),
-RolesModule,
-],
-providers: [AuthService, JwtStrategy, KafkaProvider, MailerProvider],
-controllers: [AuthController],
-exports: [AuthService],
+    imports: [
+        UsersModule,
+        TypeOrmModule.forFeature([User, RefreshToken, OtpVerification, Role, UserRole]),
+        PassportModule.register({ defaultStrategy: 'jwt' }),
+        JwtModule.register({
+            secret: process.env.JWT_SECRET || 'supersecret',
+            signOptions: { expiresIn: process.env.JWT_EXPIRES_IN || '15m' },
+        }),
+        RolesModule,
+    ],
+    providers: [AuthService, JwtStrategy, KafkaProvider, MailerProvider],
+    controllers: [AuthController],
+    exports: [AuthService],
 })
-export class AuthModule {}
+export class AuthModule { }
