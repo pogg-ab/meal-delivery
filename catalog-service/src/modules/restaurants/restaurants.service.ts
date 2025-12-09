@@ -74,4 +74,23 @@ export class RestaurantsService {
 
     return this.restaurantRepository.save(restaurant);
   }
+
+  async getScheduleSettings(
+  restaurantId: string,
+  ownerId: string,
+): Promise<Restaurant> { // It's okay to return the full entity here
+  const restaurant = await this.restaurantRepository.findOneBy({
+    id: restaurantId,
+    owner_id: ownerId,
+  });
+
+  if (!restaurant) {
+    // Use the same generic error as the update method for security
+    throw new NotFoundException(
+      'Restaurant not found or you do not have permission to access it.',
+    );
+  }
+
+  return restaurant;
+}
 }

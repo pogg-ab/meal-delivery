@@ -6,6 +6,7 @@ import { UpdateScheduleSettingsDto } from './dtos/update-schedule-settings.dto';
 import { UserId } from 'src/common/decorator/user-id.decorator';
 import { Restaurant } from 'src/entities/restaurant.entity';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
+import { GetScheduleSettingsDto } from './dtos/get-schedule-settings.dto';
 
 @ApiTags('Restaurants')
 @Controller('restaurants')
@@ -52,6 +53,41 @@ export class RestaurantsController {
       dto,
     );
   }
+
+  // Add this method inside the RestaurantsController class in restaurants.controller.ts
+
+@Get(':restaurantId/schedule-settings')
+@ApiBearerAuth('access-token')
+@UseGuards(JwtAuthGuard)
+@ApiOperation({
+  summary: "Get a restaurant's current scheduling settings (owner only)",
+})
+@ApiParam({
+  name: 'restaurantId',
+  type: 'string',
+  format: 'uuid',
+  description: 'The ID of the restaurant.',
+})
+@ApiResponse({
+  status: 200,
+  description: 'Returns the current scheduling settings.',
+  type: GetScheduleSettingsDto, // Use our new DTO for the response schema
+})
+@ApiResponse({ status: 401, description: 'Unauthorized.' })
+@ApiResponse({ status: 404, description: 'Restaurant not found.' })
+async getScheduleSettings(
+  @Param('restaurantId', ParseUUIDPipe) restaurantId: string,
+  @UserId() ownerId: string,
+): Promise<GetScheduleSettingsDto> { // Return type is our DTO
+  const restaurant = await this.restaurantsService.getScheduleSettings(
+    restaurantId,
+    ownerId,
+  );
+  // We explicitly return just the DTO to ensure we don't leak other restaurant data
+  return {
+    minimumSchedulingLeadTimeMinutes: restaurant.minimumSchedulingLeadTimeMinutes,
+  };
+}
 }
 
 
