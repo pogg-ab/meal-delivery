@@ -32,10 +32,19 @@ function setupSwagger(app: INestApplication) {
     .build();
 
   const document = SwaggerModule.createDocument(app, swaggerConfig);
-  document.servers = [
-    { url: `http://localhost:${PORT}` },
-    { url: `https://mealsystem.basirahtv.com/payment` },
-  ];
+
+  // --- START OF FIX ---
+  // REMOVED: The hardcoded list that caused the issue on deployment.
+  // document.servers = [
+  //   { url: `http://localhost:${PORT}` },
+  //   { url: `https://mealsystem.basirahtv.com/payment` },
+  // ];
+
+  // ADDED: The robust, environment-aware configuration from your working catalog-service.
+  const swaggerServerUrl = configService.get<string>('SWAGGER_SERVER_URL');
+  document.servers = [{ url: swaggerServerUrl || `http://localhost:${PORT}` }];
+  // --- END OF FIX ---
+
   SwaggerModule.setup('/api/docs', app, document, {
     swaggerOptions: { persistAuthorization: true },
     customSiteTitle: 'Payment Service - API Docs',
