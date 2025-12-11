@@ -24,6 +24,7 @@ import { ScheduledJobStatus } from '../../entities/scheduled-job.entity';
 import { RewardsService } from '../rewards/rewards.service';
 import { RewardType } from 'src/entities/enums/reward-type.enum';
 import { RewardPointsLedger } from 'src/entities/reward-points-ledger.entity';
+import { ScheduledJobType } from 'src/entities/enums/scheduled-job-type.enum';
 const dateFnsTz = require('date-fns-tz');
 
 @Injectable()
@@ -145,6 +146,7 @@ async unscheduleOrder(customerId: string, orderId: string): Promise<Order> {
 
 
 
+
 async createOrder(
     customerId: string,
     username: string,
@@ -178,7 +180,7 @@ async createOrder(
       const orderEventRepo = manager.getRepository(OrderEvent);
       const restaurantRepo = manager.getRepository(Restaurant);
       const ledgerRepo = manager.getRepository(RewardPointsLedger);
-      const jobRepo = manager.getRepository(ScheduledJob); // <-- ADDED
+      const jobRepo = manager.getRepository(ScheduledJob);
 
       const restaurant = await restaurantRepo.findOne({ where: { id: dto.restaurant_id } });
       if (!restaurant) throw new NotFoundException(`Restaurant with ID ${dto.restaurant_id} not found.`);
@@ -258,16 +260,32 @@ async createOrder(
       const orderEntity = orderRepo.create(orderData);
       const savedOrder = await orderRepo.save(orderEntity);
 
-      // --- ADDED: Create the scheduled job if it's a scheduled order ---
+      // --- START OF NEW LOGIC ---
+      // If it's a future scheduled order, create a job to PROCESS it.
       if (isScheduledOrder && deliveryTimeUtc) {
         const job = jobRepo.create({
           order: savedOrder,
           runAt: deliveryTimeUtc,
           status: ScheduledJobStatus.PENDING,
+          jobType: ScheduledJobType.PROCESS_SCHEDULED_ORDER, // Explicitly set the type
         });
         await jobRepo.save(job);
-        this.logger.log(`Created scheduled job for order ${savedOrder.id} to run at ${deliveryTimeUtc.toISOString()}`);
+        this.logger.log(`Created PROCESS_SCHEDULED_ORDER job for order ${savedOrder.id}`);
+      } else {
+        // ELSE (it's an immediate order), create a job to CANCEL it if it remains unpaid.
+        const cancellationWindowMinutes = 5; // You can make this configurable via .env
+        const cancelAt = new Date(Date.now() + cancellationWindowMinutes * 60 * 1000);
+
+        const job = jobRepo.create({
+          order: savedOrder,
+          runAt: cancelAt,
+          status: ScheduledJobStatus.PENDING,
+          jobType: ScheduledJobType.CANCEL_UNPAID_ORDER, // Use the new job type
+        });
+        await jobRepo.save(job);
+        this.logger.log(`Created CANCEL_UNPAID_ORDER job for immediate order ${savedOrder.id}`);
       }
+      // --- END OF NEW LOGIC ---
 
       // --- Create the ledger entry for the redemption (Original Logic) ---
       if (discountFromPoints > 0 && pointsToRedeem) {
@@ -359,7 +377,6 @@ async createOrder(
       return fullOrder;
     });
 }
- 
 
   
 
@@ -377,16 +394,15 @@ async ownerResponse(ownerId: string, orderId: string, accepted: boolean, reason?
       throw new BadRequestException('Not authorized to respond to this order');
     }
 
-    // --- CRITICAL VALIDATION CHANGE ---
-    // The owner can ONLY act on an order that has been SCHEDULED by the customer.
+ 
     if (order.status !== OrderStatus.SCHEDULED) {
       throw new BadRequestException('This order is not currently scheduled and cannot be actioned.');
     }
 
-    // --- NEW LOGIC: DELETE THE SCHEDULED JOB ---
-    // Whether the owner accepts or declines, the scheduled job is no longer needed.
-    // We must delete it to prevent it from running later.
-    await jobRepo.delete({ order: { id: order.id } });
+    await jobRepo.delete({
+  order: { id: order.id },
+  jobType: ScheduledJobType.PROCESS_SCHEDULED_ORDER,
+});
     this.logger.log(`Owner action on order ${order.id}. Associated scheduled job has been deleted.`);
 
     // --- The rest of the logic proceeds ---
@@ -508,8 +524,7 @@ try {
   return order;
 }
 
-
-  async handlePaymentResult(payload: any) {
+async handlePaymentResult(payload: any) {
   this.logger.log(`handlePaymentResult: ${JSON.stringify(payload)}`);
   const order = await this.orderRepo.findOne({
     where: { id: payload.order_id },
@@ -535,6 +550,19 @@ try {
     ['success', 'paid', 'PAID', 'SUCCESS'].includes(String(payStatus).toLowerCase());
 
   if (isSuccess) {
+    // --- ADDED BLOCK: Defuse the cancellation job upon successful payment ---
+    try {
+      const jobRepo = this.dataSource.getRepository(ScheduledJob);
+      await jobRepo.delete({
+        order: { id: order.id },
+        jobType: ScheduledJobType.CANCEL_UNPAID_ORDER,
+      });
+      this.logger.log(`Payment successful for order ${order.id}, deleted pending cancellation job.`);
+    } catch (e) {
+      this.logger.error(`Failed to delete cancellation job for paid order ${order.id}`, e);
+    }
+    // --- END OF ADDED BLOCK ---
+
     // --- Update order payment fields and status ---
     order.payment_status = PaymentStatus.PAID;
     order.payment_reference =
@@ -677,7 +705,6 @@ try {
 
   return;
 }
-
 
 private maskPickupCode(code?: string | number | null): string | null {
   if (code === null || code === undefined) return null;

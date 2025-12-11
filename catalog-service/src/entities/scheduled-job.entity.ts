@@ -9,6 +9,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Order } from './order.entity';
+import { ScheduledJobType } from './enums/scheduled-job-type.enum';
 
 export enum ScheduledJobStatus {
   PENDING = 'pending',
@@ -54,4 +55,16 @@ export class ScheduledJob {
 
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
+
+  @Column({
+    type: 'enum',
+    enum: ScheduledJobType,
+    default: ScheduledJobType.PROCESS_SCHEDULED_ORDER,
+  })
+  jobType: ScheduledJobType;
+  // --- END ADD ---
+
+  // --- ADD THIS NEW COLUMN (for error details) ---
+  @Column({ type: 'jsonb', nullable: true })
+  meta: any;
 }
