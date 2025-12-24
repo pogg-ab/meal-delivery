@@ -1,0 +1,468 @@
+openapi: 3.0.0
+paths:
+  /auth/register:
+    post:
+      operationId: AuthController_register
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterDto'
+      responses:
+        '201':
+          description: ''
+      tags: &ref_0
+        - Auth
+  /auth/verify:
+    post:
+      operationId: AuthController_verify
+      parameters:
+        - name: token
+          required: true
+          in: query
+          schema:
+            type: string
+      responses:
+        '201':
+          description: ''
+      tags: *ref_0
+  /auth/login:
+    post:
+      operationId: AuthController_login
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginDto'
+      responses:
+        '201':
+          description: ''
+      tags: *ref_0
+  /auth/forgot:
+    post:
+      operationId: AuthController_forgot
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForgotPasswordDto'
+      responses:
+        '201':
+          description: ''
+      tags: *ref_0
+  /auth/reset:
+    post:
+      operationId: AuthController_reset
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetPasswordDto'
+      responses:
+        '201':
+          description: ''
+      tags: *ref_0
+  /auth/resend-verification:
+    post:
+      operationId: AuthController_resendVerification
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResendVerificationDto'
+      responses:
+        '201':
+          description: ''
+      tags: *ref_0
+  /tenants:
+    post:
+      operationId: TenantController_create
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTenantDto'
+      responses:
+        '201':
+          description: ''
+      tags: &ref_1
+        - Tenant
+    get:
+      operationId: TenantController_findAll
+      parameters: []
+      responses:
+        '200':
+          description: ''
+      tags: *ref_1
+  /tenants/{tid}:
+    get:
+      operationId: TenantController_findOne
+      parameters:
+        - name: tid
+          required: true
+          in: path
+          schema:
+            type: number
+      responses:
+        '200':
+          description: ''
+      tags: *ref_1
+    patch:
+      operationId: TenantController_update
+      parameters:
+        - name: tid
+          required: true
+          in: path
+          schema:
+            type: number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTenantDto'
+      responses:
+        '200':
+          description: ''
+      tags: *ref_1
+    delete:
+      operationId: TenantController_remove
+      parameters:
+        - name: tid
+          required: true
+          in: path
+          schema:
+            type: number
+      responses:
+        '200':
+          description: ''
+      tags: *ref_1
+  /tenants/{tid}/roles:
+    get:
+      operationId: RoleManagementController_findAll
+      parameters:
+        - name: tid
+          required: true
+          in: path
+          schema:
+            type: number
+      responses:
+        '200':
+          description: ''
+      tags: &ref_2
+        - RoleManagement
+    post:
+      operationId: RoleManagementController_create
+      parameters:
+        - name: tid
+          required: true
+          in: path
+          schema:
+            type: number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRoleDto'
+      responses:
+        '201':
+          description: ''
+      tags: *ref_2
+  /tenants/{tid}/roles/permissions/available:
+    get:
+      operationId: RoleManagementController_getAvailablePermissions
+      parameters: []
+      responses:
+        '200':
+          description: ''
+      tags: *ref_2
+  /tenants/{tid}/roles/{rid}:
+    get:
+      operationId: RoleManagementController_findOne
+      parameters:
+        - name: tid
+          required: true
+          in: path
+          schema:
+            type: number
+        - name: rid
+          required: true
+          in: path
+          schema:
+            type: number
+      responses:
+        '200':
+          description: ''
+      tags: *ref_2
+    patch:
+      operationId: RoleManagementController_update
+      parameters:
+        - name: tid
+          required: true
+          in: path
+          schema:
+            type: number
+        - name: rid
+          required: true
+          in: path
+          schema:
+            type: number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRoleDto'
+      responses:
+        '200':
+          description: ''
+      tags: *ref_2
+    delete:
+      operationId: RoleManagementController_remove
+      parameters:
+        - name: tid
+          required: true
+          in: path
+          schema:
+            type: number
+        - name: rid
+          required: true
+          in: path
+          schema:
+            type: number
+      responses:
+        '200':
+          description: ''
+      tags: *ref_2
+  /tenants/{tid}/roles/{rid}/permissions/ids:
+    put:
+      operationId: RoleManagementController_updatePermsByIds
+      parameters:
+        - name: tid
+          required: true
+          in: path
+          schema:
+            type: number
+        - name: rid
+          required: true
+          in: path
+          schema:
+            type: number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePermissionsByIdsDto'
+      responses:
+        '200':
+          description: ''
+      tags: *ref_2
+  /tenants/{tid}/users:
+    get:
+      operationId: UserManagementController_findAll
+      parameters:
+        - name: tid
+          required: true
+          in: path
+          schema:
+            type: number
+      responses:
+        '200':
+          description: ''
+      tags: &ref_3
+        - UserManagement
+  /tenants/{tid}/users/{uid}:
+    get:
+      operationId: UserManagementController_findOne
+      parameters:
+        - name: tid
+          required: true
+          in: path
+          schema:
+            type: number
+        - name: uid
+          required: true
+          in: path
+          schema:
+            type: number
+      responses:
+        '200':
+          description: ''
+      tags: *ref_3
+    patch:
+      operationId: UserManagementController_update
+      parameters:
+        - name: tid
+          required: true
+          in: path
+          schema:
+            type: number
+        - name: uid
+          required: true
+          in: path
+          schema:
+            type: number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserDto'
+      responses:
+        '200':
+          description: ''
+      tags: *ref_3
+    delete:
+      operationId: UserManagementController_remove
+      parameters:
+        - name: tid
+          required: true
+          in: path
+          schema:
+            type: number
+        - name: uid
+          required: true
+          in: path
+          schema:
+            type: number
+      responses:
+        '200':
+          description: ''
+      tags: *ref_3
+  /tenants/{tid}/users/{uid}/roles:
+    post:
+      operationId: UserManagementController_addRoles
+      parameters:
+        - name: tid
+          required: true
+          in: path
+          schema:
+            type: number
+        - name: uid
+          required: true
+          in: path
+          schema:
+            type: number
+      responses:
+        '201':
+          description: ''
+      tags: *ref_3
+  /{tid}/permissions:
+    get:
+      operationId: PermissionsController_findAll
+      parameters: []
+      responses:
+        '200':
+          description: ''
+      tags:
+        - Permissions
+info:
+  title: My App API
+  description: API docs for My App
+  version: '1.0'
+  contact: {}
+tags: []
+servers:
+  - url: http://localhost:3000
+components:
+  securitySchemes:
+    access-token:
+      scheme: bearer
+      bearerFormat: JWT
+      type: http
+      name: Authorization
+      description: Enter JWT token
+      in: header
+  schemas:
+    RegisterDto:
+      type: object
+      properties:
+        email:
+          type: string
+          example: john.doe@example.com
+        password:
+          type: string
+          example: Aman12345
+        username:
+          type: string
+          example: AmanT16
+        full_name:
+          type: string
+          example: John Doe
+        tenantId:
+          type: number
+          example: 1
+      required:
+        - email
+        - password
+        - username
+        - full_name
+        - tenantId
+    LoginDto:
+      type: object
+      properties:
+        email:
+          type: string
+          example: JOhndoe1234@gmail.com
+        password:
+          type: string
+          example: Aman12345
+      required:
+        - email
+        - password
+    ForgotPasswordDto:
+      type: object
+      properties:
+        email:
+          type: string
+          example: JOhndoe1234@gmail.com
+      required:
+        - email
+    ResetPasswordDto:
+      type: object
+      properties:
+        newPassword:
+          type: string
+          example: JOhndoe1234
+      required:
+        - newPassword
+    ResendVerificationDto:
+      type: object
+      properties:
+        email:
+          type: string
+          example: Johndoe12@gmail.com
+      required:
+        - email
+    CreateTenantDto:
+      type: object
+      properties: {}
+    UpdateTenantDto:
+      type: object
+      properties: {}
+    CreateRoleDto:
+      type: object
+      properties: {}
+    UpdateRoleDto:
+      type: object
+      properties: {}
+    UpdatePermissionsByIdsDto:
+      type: object
+      properties: {}
+    UpdateUserDto:
+      type: object
+      properties: {}

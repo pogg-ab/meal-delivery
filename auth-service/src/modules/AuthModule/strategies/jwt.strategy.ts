@@ -1,0 +1,42 @@
+
+import { Injectable } from '@nestjs/common';
+import { PassportStrategy } from '@nestjs/passport';
+import { Strategy, ExtractJwt } from 'passport-jwt';
+
+interface JwtPayload {
+  sub: string;
+  email: string;
+  username: string;
+  phone: string;
+  roles?: string[];
+  permissions?: string[];
+  restaurant_id?: string;
+}
+
+@Injectable()
+export class JwtStrategy extends PassportStrategy(Strategy) {
+  constructor() {
+    super({
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+        ExtractJwt.fromUrlQueryParameter('token'),
+      ]),
+      ignoreExpiration: false,
+      secretOrKey: process.env.JWT_SECRET || 'supersecret',
+    });
+  }
+
+  async validate(payload: JwtPayload) {
+    // Attach clean user info to req.user
+    console.log('In jwt service: ', payload.restaurant_id)
+    return {
+      userId: payload.sub,
+      email: payload.email,
+      username: payload.username,
+      phone: payload.phone,
+      roles: payload.roles || [],
+      permissions: payload.permissions || [],
+      restaurantId: payload.restaurant_id || null,
+    };
+  }
+}
