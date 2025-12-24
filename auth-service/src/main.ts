@@ -55,6 +55,10 @@ async function bootstrap() {
     exposedHeaders: 'Content-Disposition',
   });
 
+  // Lightweight health endpoints (bypass Nest routing) to make deployment probes reliable
+  app.use('/health', (_req, res) => res.status(200).json({ status: 'ok' }));
+  app.use('/api/health', (_req, res) => res.status(200).json({ status: 'ok' }));
+
   // Global validation
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 
