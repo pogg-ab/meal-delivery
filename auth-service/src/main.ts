@@ -12,6 +12,8 @@ import { ConfigService } from '@nestjs/config';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // Trust proxy so app and Passport build correct absolute URLs behind nginx
+  app.set('trust proxy', true);
 
   // Load env vars via ConfigService (best practice)
   const configService = app.get(ConfigService);
