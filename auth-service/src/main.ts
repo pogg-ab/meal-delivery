@@ -16,6 +16,7 @@ async function bootstrap() {
   // Load env vars via ConfigService (best practice)
   const configService = app.get(ConfigService);
   const PORT = configService.get<number>('PORT', 3000);
+  const HOST = configService.get<string>('HOST', '0.0.0.0');
   const NODE_ENV = configService.get<string>('NODE_ENV', 'development');
 
   // Serve uploads (static assets)
@@ -83,9 +84,9 @@ async function bootstrap() {
     });
   }
 
-  await app.listen(PORT);
-  console.log(`🚀 App running on http://localhost:${PORT}`);
-  console.log(`📖 Swagger docs: http://localhost:${PORT}/api/docs`);
+  await app.listen(PORT, HOST);
+  console.log(`🚀 App running on http://${HOST}:${PORT}`);
+  console.log(`📖 Swagger docs: http://${HOST}:${PORT}/api/docs`);
   console.log('Allowed CORS origins:', allowedOrigins.join(', '));
 }
 
