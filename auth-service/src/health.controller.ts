@@ -6,4 +6,9 @@ export class HealthController {
   health() {
     return { status: 'ok' };
   }
+
+  @Get('api/health')
+  apiHealth() {
+    return this.health();
+  }
 }
