@@ -99,8 +99,15 @@ async login(@Body() dto: LoginDto, @Req() req: Request): Promise<LoginResponseDt
   async facebookCallback(@Req() req: Request, @Res() res: Response) {
     const userAgent = req.headers['user-agent'] || 'unknown';
     const ip = req.ip || 'unknown';
-    const result = await this.authService.ssoLoginFromPassport((req as any).user, 'facebook', userAgent, ip);
-    res.redirect(`${process.env.FRONTEND_URL}/auth/callback?accessToken=${result.accessToken}&refreshToken=${result.refreshToken}`);
+    try {
+      const result = await this.authService.ssoLoginFromPassport((req as any).user, 'facebook', userAgent, ip);
+      return res.redirect(`${process.env.FRONTEND_URL}/auth/callback?accessToken=${result.accessToken}&refreshToken=${result.refreshToken}`);
+    } catch (err) {
+      // Temporary enhanced logging for debugging SSO callback failures
+      // eslint-disable-next-line no-console
+      console.error('[SSO][facebook] callback error:', err && err.stack ? err.stack : err);
+      return res.status(500).json({ message: 'Internal server error' });
+    }
   }
 
   @Get('me')
