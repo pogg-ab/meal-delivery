@@ -61,11 +61,11 @@ async login(@Body() dto: LoginDto, @Req() req: Request): Promise<LoginResponseDt
 
   @Post('sso/:provider')
   @ApiOperation({ summary: 'SSO login with Google or Facebook' })
-  @ApiBody({ schema: { type: 'object', properties: { token: { type: 'string' } } } })
-  async ssoLogin(@Body('token') token: string, @Param('provider') provider: string, @Req() req: Request) {
+  @ApiBody({ schema: { type: 'object', properties: { idToken: { type: 'string' } } } })
+  async ssoLogin(@Body('idToken') idToken: string, @Param('provider') provider: string, @Req() req: Request) {
     const userAgent = req.headers['user-agent'] || 'unknown';
     const ip = req.ip || 'unknown';
-    return this.authService.ssoLogin(token, provider, userAgent, ip);
+    return this.authService.ssoLogin(idToken, provider, userAgent, ip);
   }
 
   @Get('google')
