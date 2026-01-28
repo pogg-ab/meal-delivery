@@ -18,21 +18,33 @@ import { Role } from '../../entities/Role.entity';
 import { UserRole } from '../../entities/User-role.entity';
 import { UsersModule } from '../UserModule/user.module';
 
-
 @Module({
-    imports: [
-        UsersModule,
-        TypeOrmModule.forFeature([User, RefreshToken, OtpVerification, Role, UserRole]),
-        PassportModule.register({ defaultStrategy: 'jwt' }),
-        JwtModule.register({
-            secret: process.env.JWT_SECRET || 'supersecret',
-            signOptions: { expiresIn: process.env.JWT_EXPIRES_IN || '15m' },
-        }),
-        RolesModule,
-        HttpModule,
-    ],
-    providers: [AuthService, JwtStrategy, GoogleStrategy, FacebookStrategy, KafkaProvider, MailerProvider],
-    controllers: [AuthController],
-    exports: [AuthService],
+  imports: [
+    UsersModule,
+    TypeOrmModule.forFeature([
+      User,
+      RefreshToken,
+      OtpVerification,
+      Role,
+      UserRole,
+    ]),
+    PassportModule.register({ defaultStrategy: 'jwt' }),
+    JwtModule.register({
+      secret: process.env.JWT_SECRET || 'supersecret',
+      signOptions: { expiresIn: process.env.JWT_EXPIRES_IN || '15m' },
+    }),
+    RolesModule,
+    HttpModule,
+  ],
+  providers: [
+    AuthService,
+    JwtStrategy,
+    GoogleStrategy,
+    ...(process.env.FACEBOOK_APP_ID ? [FacebookStrategy] : []),
+    KafkaProvider,
+    MailerProvider,
+  ],
+  controllers: [AuthController],
+  exports: [AuthService],
 })
-export class AuthModule { }
+export class AuthModule {}

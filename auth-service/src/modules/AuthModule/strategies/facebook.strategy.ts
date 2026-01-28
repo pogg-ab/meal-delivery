@@ -6,10 +6,14 @@ import { ConfigService } from '@nestjs/config';
 @Injectable()
 export class FacebookStrategy extends PassportStrategy(Strategy, 'facebook') {
   constructor(private configService: ConfigService) {
+    const clientID = process.env.FACEBOOK_APP_ID;
+    if (!clientID) {
+      throw new Error('FACEBOOK_APP_ID is not set');
+    }
     super({
-      clientID: configService.get<string>('FACEBOOK_APP_ID'),
-      clientSecret: configService.get<string>('FACEBOOK_APP_SECRET'),
-      callbackURL: configService.get<string>('FACEBOOK_CALLBACK_URL'),
+      clientID,
+      clientSecret: process.env.FACEBOOK_APP_SECRET,
+      callbackURL: process.env.FACEBOOK_CALLBACK_URL,
       scope: ['email'],
       profileFields: ['emails', 'name', 'photos'],
     });
