@@ -3,8 +3,8 @@ FROM node:20 AS builder
 WORKDIR /usr/src/app
 COPY package*.json ./
 RUN npm install --legacy-peer-deps
-RUN chmod +x node_modules/.bin/nest
 COPY . .
+RUN chmod +x node_modules/.bin/nest
 RUN npm run build
 
 # ----- Production Stage -----
