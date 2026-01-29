@@ -4,6 +4,7 @@ WORKDIR /usr/src/app
 COPY package*.json ./
 RUN npm install --legacy-peer-deps
 RUN chmod +x node_modules/.bin/nest
+ENV PATH="$PATH:/usr/src/app/node_modules/.bin"
 COPY . .
 RUN npm run build
 
