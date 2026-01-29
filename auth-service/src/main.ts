@@ -1,6 +1,3 @@
-
-
-
 import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
@@ -27,25 +24,22 @@ async function bootstrap() {
   });
 
   // Build allowed CORS origins
-  const defaultOrigins = [
-    'http://localhost:3001',
-    `http://localhost:${PORT}`,
-  ];
+  const defaultOrigins = ['http://localhost:3001', `http://localhost:${PORT}`];
   const envOrigins = (configService.get<string>('CORS_ORIGINS') || '')
     .split(',')
-    .map(s => s.trim())
+    .map((s) => s.trim())
     .filter(Boolean);
 
   const allowedOrigins = envOrigins.length ? envOrigins : defaultOrigins;
 
-  // Temporary: allow all origins for verification (fast test only)
-  app.enableCors({
-    origin: true,
-    credentials: true,
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
-    allowedHeaders: 'Content-Type, Authorization, Accept, X-Requested-With',
-    exposedHeaders: 'Content-Disposition',
-  });
+  // Enable CORS with allowed origins
+  // app.enableCors({
+  //   origin: allowedOrigins,
+  //   credentials: true,
+  //   methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+  //   allowedHeaders: 'Content-Type, Authorization, Accept, X-Requested-With',
+  //   exposedHeaders: 'Content-Disposition',
+  // });
 
   // Lightweight health endpoints (bypass Nest routing) to make deployment probes reliable
   app.use('/health', (_req, res) => res.status(200).json({ status: 'ok' }));
@@ -68,12 +62,13 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, swaggerConfig);
 
   // Point Swagger "Try it out" to the correct server
-   document.servers = [
-    { url: configService.get<string>('SWAGGER_SERVER_URL') || `http://localhost:${PORT}` },
-  ];
+  document.servers = [{ url: 'https://mealsystem.basirahtv.com' }];
 
   // Swagger UI (disabled in prod unless explicitly allowed)
-  if (NODE_ENV !== 'production' || configService.get<boolean>('ENABLE_SWAGGER', false)) {
+  if (
+    NODE_ENV !== 'production' ||
+    configService.get('ENABLE_SWAGGER') === 'true'
+  ) {
     SwaggerModule.setup('/api/docs', app, document, {
       swaggerOptions: { persistAuthorization: true },
       customSiteTitle: 'My App - API Docs',
@@ -87,4 +82,3 @@ async function bootstrap() {
 }
 
 bootstrap();
-
