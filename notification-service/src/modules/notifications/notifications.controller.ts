@@ -15,6 +15,7 @@ import { OrderCancelledEvent } from './dto/order-cancelled.event';
 import { OrderScheduleDueEvent } from './dto/order-schedule-due.event';
 import { RewardPointsEarnedEvent } from './dto/reward-points-earned.event';
 import { OrderPaidWithPickupEvent } from './dto/order-paid-with-pickup.event';
+import { UserRegisteredEvent } from './dto/user-registered.event';
 
 // --- Define the shape of the new Kafka event payload ---
 class LowStockEvent {
@@ -263,6 +264,22 @@ async handleRewardPointsEarned(@Payload() data: RewardPointsEarnedEvent) {
 async handleOrderPaid(@Payload() payload: OrderPaidWithPickupEvent) {
   this.logger.log(`Received order paid event with pickup code: ${JSON.stringify(payload)}`);
   return this.notificationsService.handleOrderPaidWithPickup(payload);
+}
+
+@EventPattern('identity.user.registered')
+async handleUserRegistered(@Payload() data: UserRegisteredEvent) {
+  this.logger.log(`Received user registered event for user ID: ${data.user_id}, email: ${data.email}`);
+  
+  try {
+    // Send welcome notification to the user
+    // Note: We need device tokens to send push notifications
+    // For now, we'll just log the event
+    this.logger.log(`User ${data.user_id} registered successfully. Welcome notification would be sent here.`);
+    
+    // TODO: Implement welcome notification logic when device tokens are available
+  } catch (error) {
+    this.logger.error(`Failed to handle user registered event: ${error.message}`, error.stack);
+  }
 }
 
   // ====================================================================
