@@ -41,6 +41,12 @@ async function bootstrap() {
   //   exposedHeaders: 'Content-Disposition',
   // });
 
+  // Disable CORS since nginx handles it
+  // app.enableCors({
+  //   origin: false,
+  //   credentials: false,
+  // });
+
   // Lightweight health endpoints (bypass Nest routing) to make deployment probes reliable
   app.use('/health', (_req, res) => res.status(200).json({ status: 'ok' }));
   app.use('/api/health', (_req, res) => res.status(200).json({ status: 'ok' }));
@@ -65,15 +71,15 @@ async function bootstrap() {
   document.servers = [{ url: 'https://mealsystem.basirahtv.com' }];
 
   // Swagger UI (disabled in prod unless explicitly allowed)
-  if (
-    NODE_ENV !== 'production' ||
-    configService.get('ENABLE_SWAGGER') === 'true'
-  ) {
-    SwaggerModule.setup('/api/docs', app, document, {
-      swaggerOptions: { persistAuthorization: true },
-      customSiteTitle: 'My App - API Docs',
-    });
-  }
+  // if (
+  //   NODE_ENV !== 'production' ||
+  //   configService.get('ENABLE_SWAGGER') === 'true'
+  // ) {
+  SwaggerModule.setup('/api/docs', app, document, {
+    swaggerOptions: { persistAuthorization: true },
+    customSiteTitle: 'My App - API Docs',
+  });
+  // }
 
   await app.listen(PORT, HOST);
   console.log(`🚀 App running on http://${HOST}:${PORT}`);

@@ -110,19 +110,19 @@ services:
       - erp-net
 
   # --- APPLICATION SERVICES ---
-  auth-service:
-    build: ./auth-service
-    ports:
-      - "8000:3000"
-    env_file:
-      - ./auth-service/.env
-    depends_on:
-      - auth-service-db
-      - kafka
-    volumes:
-      - auth_service_uploads:/usr/src/app/uploads
-    networks:
-      - erp-net
+  # auth-service:
+  #   build: ./auth-service
+  #   ports:
+  #     - "8000:3000"
+  #   env_file:
+  #     - ./auth-service/.env
+  #   depends_on:
+  #     - auth-service-db
+  #     - kafka
+  #   volumes:
+  #     - auth_service_uploads:/usr/src/app/uploads
+  #   networks:
+  #     - erp-net
 
   catalog-service:
     build: ./catalog-service
@@ -163,6 +163,8 @@ services:
 
   analytics-service:
     build: ./analytics-service
+    ports:
+      - "8004:3005"
     env_file:
       - ./analytics-service/.env
     depends_on:

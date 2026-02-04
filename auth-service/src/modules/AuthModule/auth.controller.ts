@@ -1,7 +1,27 @@
-
-import { Controller, Post, Body, Req, UseGuards, HttpStatus, HttpCode, Delete, Param, Patch, Get, UseInterceptors, Res } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  Req,
+  UseGuards,
+  HttpStatus,
+  HttpCode,
+  Delete,
+  Param,
+  Patch,
+  Get,
+  UseInterceptors,
+  Res,
+} from '@nestjs/common';
 import { Request, Response } from 'express';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiBody, ApiParam } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+  ApiBody,
+  ApiParam,
+} from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dtos/register.dto';
 import { LoginDto } from './dtos/login.dto';
@@ -22,10 +42,11 @@ import { UsersService } from '../UserModule/user.service';
 import { AuthGuard } from '@nestjs/passport';
 
 @ApiTags('Auth') // Groups under "Auth"
-@Controller('auth')
+@Controller()
 export class AuthController {
-  constructor(private readonly authService: AuthService,
-     private readonly usersService: UsersService,
+  constructor(
+    private readonly authService: AuthService,
+    private readonly usersService: UsersService,
   ) {}
 
   @Post('register')
@@ -41,28 +62,42 @@ export class AuthController {
     return this.authService.verifyOtp(dto);
   }
 
+  @Post('login')
+  @ApiOperation({ summary: 'User login' })
+  @ApiOkResponse({ type: LoginResponseDto })
+  async login(
+    @Body() dto: LoginDto,
+    @Req() req: Request,
+  ): Promise<LoginResponseDto> {
+    const user = await this.authService.validateUserCredentials(
+      dto.email,
+      dto.password,
+    );
+    console.log(user);
 
-@Post('login')
-@ApiOperation({ summary: 'User login' })
-@ApiOkResponse({ type: LoginResponseDto })
-async login(@Body() dto: LoginDto, @Req() req: Request): Promise<LoginResponseDto> {
-  const user = await this.authService.validateUserCredentials(dto.email, dto.password);
-  console.log(user);
+    const userAgent = Array.isArray(req.headers['user-agent'])
+      ? req.headers['user-agent'][0]
+      : req.headers['user-agent'] || 'unknown';
 
-  const userAgent = Array.isArray(req.headers['user-agent'])
-    ? req.headers['user-agent'][0]
-    : req.headers['user-agent'] || 'unknown';
+    const ip =
+      req.ip ||
+      (req.connection && (req.connection as any).remoteAddress) ||
+      'unknown';
 
-  const ip = req.ip || (req.connection && (req.connection as any).remoteAddress) || 'unknown';
-
-  // pass dto.remember (boolean) to service
-  return this.authService.login(user, userAgent, ip, !!dto.remember);
-}
+    // pass dto.remember (boolean) to service
+    return this.authService.login(user, userAgent, ip, !!dto.remember);
+  }
 
   @Post('sso/:provider')
   @ApiOperation({ summary: 'SSO login with Google or Facebook' })
-  @ApiBody({ schema: { type: 'object', properties: { idToken: { type: 'string' } } } })
-  async ssoLogin(@Body('idToken') idToken: string, @Param('provider') provider: string, @Req() req: Request) {
+  @ApiBody({
+    schema: { type: 'object', properties: { idToken: { type: 'string' } } },
+  })
+  async ssoLogin(
+    @Body('idToken') idToken: string,
+    @Param('provider') provider: string,
+    @Req() req: Request,
+  ) {
     const userAgent = req.headers['user-agent'] || 'unknown';
     const ip = req.ip || 'unknown';
     return this.authService.ssoLogin(idToken, provider, userAgent, ip);
@@ -81,9 +116,16 @@ async login(@Body() dto: LoginDto, @Req() req: Request): Promise<LoginResponseDt
   async googleCallback(@Req() req: Request, @Res() res: Response) {
     const userAgent = req.headers['user-agent'] || 'unknown';
     const ip = req.ip || 'unknown';
-    const result = await this.authService.ssoLoginFromPassport((req as any).user, 'google', userAgent, ip);
+    const result = await this.authService.ssoLoginFromPassport(
+      (req as any).user,
+      'google',
+      userAgent,
+      ip,
+    );
     // Redirect to frontend with tokens or set in session/cookies
-    res.redirect(`${process.env.FRONTEND_URL}/auth/callback?accessToken=${result.accessToken}&refreshToken=${result.refreshToken}`);
+    res.redirect(
+      `${process.env.FRONTEND_URL}/auth/callback?accessToken=${result.accessToken}&refreshToken=${result.refreshToken}`,
+    );
   }
 
   @Get('facebook')
@@ -100,12 +142,22 @@ async login(@Body() dto: LoginDto, @Req() req: Request): Promise<LoginResponseDt
     const userAgent = req.headers['user-agent'] || 'unknown';
     const ip = req.ip || 'unknown';
     try {
-      const result = await this.authService.ssoLoginFromPassport((req as any).user, 'facebook', userAgent, ip);
-      return res.redirect(`${process.env.FRONTEND_URL}/auth/callback?accessToken=${result.accessToken}&refreshToken=${result.refreshToken}`);
+      const result = await this.authService.ssoLoginFromPassport(
+        (req as any).user,
+        'facebook',
+        userAgent,
+        ip,
+      );
+      return res.redirect(
+        `${process.env.FRONTEND_URL}/auth/callback?accessToken=${result.accessToken}&refreshToken=${result.refreshToken}`,
+      );
     } catch (err) {
       // Temporary enhanced logging for debugging SSO callback failures
       // eslint-disable-next-line no-console
-      console.error('[SSO][facebook] callback error:', err && err.stack ? err.stack : err);
+      console.error(
+        '[SSO][facebook] callback error:',
+        err && err.stack ? err.stack : err,
+      );
       return res.status(500).json({ message: 'Internal server error' });
     }
   }
@@ -138,18 +190,26 @@ async login(@Body() dto: LoginDto, @Req() req: Request): Promise<LoginResponseDt
     return this.authService.logout(userId, dto.refreshToken);
   }
 
-
   @Post('resend')
   @ApiOperation({ summary: 'Resend OTP (if previous expired or used)' })
-  @ApiResponse({ status: 200, description: 'Resent OTP or informed still valid' })
+  @ApiResponse({
+    status: 200,
+    description: 'Resent OTP or informed still valid',
+  })
   @ApiBody({ type: ResendOtpDto })
   async resendOtp(@Body() dto: ResendOtpDto) {
-    return this.authService.resendOtp(dto.email, (dto as any).purpose ?? 'registration');
+    return this.authService.resendOtp(
+      dto.email,
+      (dto as any).purpose ?? 'registration',
+    );
   }
 
   @Post('forgot-password')
   @ApiOperation({ summary: 'Request password reset OTP (forgot password)' })
-  @ApiResponse({ status: 200, description: 'OTP sent if user exists (generic response)' })
+  @ApiResponse({
+    status: 200,
+    description: 'OTP sent if user exists (generic response)',
+  })
   @ApiBody({ type: ForgotPasswordDto })
   async forgotPassword(@Body() dto: ForgotPasswordDto) {
     return this.authService.forgotPassword(dto.email);
@@ -163,32 +223,35 @@ async login(@Body() dto: LoginDto, @Req() req: Request): Promise<LoginResponseDt
     return this.authService.resetPassword(dto);
   }
 
-@Patch('change-password')
-@UseGuards(JwtAuthGuard)
-@HttpCode(HttpStatus.OK)
-@ApiBearerAuth('access-token')
-@ApiOperation({ summary: 'Change authenticated user password' })
-async changePassword(
-  @Req() req: any,
-  @Body() changePasswordDto: ChangePasswordDto,
-) {
-  const userId = req.user.userId;
-  await this.usersService.changePassword(userId, changePasswordDto);
+  @Patch('change-password')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Change authenticated user password' })
+  async changePassword(
+    @Req() req: any,
+    @Body() changePasswordDto: ChangePasswordDto,
+  ) {
+    const userId = req.user.userId;
+    await this.usersService.changePassword(userId, changePasswordDto);
 
-  return { message: 'Password changed successfully' };
-}
+    return { message: 'Password changed successfully' };
+  }
 
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete a customer by id' })
   @ApiParam({ name: 'id', description: 'User UUID to delete' })
-  @ApiResponse({ status: 200, description: 'User deleted', schema: { example: { user_id: 'uuid', message: 'user_deleted' } } })
+  @ApiResponse({
+    status: 200,
+    description: 'User deleted',
+    schema: { example: { user_id: 'uuid', message: 'user_deleted' } },
+  })
   @ApiResponse({ status: 404, description: 'User not found' })
   @ApiResponse({ status: 403, description: 'User is not a customer' })
   async deleteUser(@Param() params: DeleteUserParamsDto) {
     return await this.authService.deleteUserIfCustomer(params.id);
   }
-
 
   /**
    * DELETE /users/customers
@@ -199,8 +262,15 @@ async changePassword(
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete all users with the customer role' })
   @ApiBody({ type: DeleteAllCustomersDto, required: true })
-  @ApiResponse({ status: 200, description: 'Customers deleted', schema: { example: { deleted: 42, message: 'customers_deleted' } } })
-  @ApiResponse({ status: 400, description: 'Bad request (confirm missing or false)' })
+  @ApiResponse({
+    status: 200,
+    description: 'Customers deleted',
+    schema: { example: { deleted: 42, message: 'customers_deleted' } },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request (confirm missing or false)',
+  })
   async deleteAllCustomers(@Body() body: DeleteAllCustomersDto) {
     if (!body.confirm) {
       return { deleted: 0, message: 'confirm_required' };

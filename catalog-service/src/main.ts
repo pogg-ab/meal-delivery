@@ -1,4 +1,3 @@
-
 import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
@@ -10,7 +9,9 @@ import { kafkaConfig } from './kafka.config';
 
 const nodeCrypto = require('crypto');
 if (!('crypto' in globalThis)) {
-  (globalThis as any).crypto = nodeCrypto.webcrypto ?? { randomUUID: nodeCrypto.randomUUID };
+  (globalThis as any).crypto = nodeCrypto.webcrypto ?? {
+    randomUUID: nodeCrypto.randomUUID,
+  };
 }
 
 /**
@@ -24,13 +25,22 @@ function setupSwagger(app: INestApplication) {
     .setTitle('Catalog Service') // <-- Specific to Catalog Service
     .setDescription('API for restaurants, menus, items, and inventory.') // <-- Specific to Catalog Service
     .setVersion('1.0')
-    .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'access-token')
+    .addBearerAuth(
+      { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+      'access-token',
+    )
     .build();
 
   const document = SwaggerModule.createDocument(app, swaggerConfig);
 
   // This line reads from your .env file
-  document.servers = [{ url: configService.get<string>('SWAGGER_SERVER_URL') || `http://localhost:${PORT}` }];
+  document.servers = [
+    {
+      url:
+        configService.get<string>('SWAGGER_SERVER_URL') ||
+        `http://localhost:${PORT}`,
+    },
+  ];
 
   SwaggerModule.setup('/api/docs', app, document, {
     swaggerOptions: { persistAuthorization: true },
@@ -45,7 +55,7 @@ async function bootstrap() {
   const NODE_ENV = configService.get<string>('NODE_ENV', 'development');
 
   // Use a simple, permissive CORS for now
-  app.enableCors();
+  // app.enableCors();
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 

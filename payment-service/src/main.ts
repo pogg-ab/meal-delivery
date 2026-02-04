@@ -79,7 +79,7 @@ async function bootstrap() {
   const configService = app.get(ConfigService);
   const PORT = configService.get<number>('PORT', 3008);
 
-  app.enableCors();
+  // app.enableCors();
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 
   // Always enable Swagger
