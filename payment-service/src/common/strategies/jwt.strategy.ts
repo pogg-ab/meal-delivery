@@ -1,5 +1,3 @@
-// in catalog-service/src/common/strategies/jwt.strategy.ts
-
 import { Injectable } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { Strategy, ExtractJwt } from 'passport-jwt';
@@ -14,22 +12,23 @@ interface JwtPayload {
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(private readonly configService: ConfigService) {
-    const jwtSecret = configService.get<string>(
-      'JWT_SECRET',
-      'default_jwt_secret',
-    );
-    if (!jwtSecret) {
-      throw new Error('JWT_SECRET is not defined in environment variables');
-    }
+    const accessSecret = configService.get<string>('JWT_ACCESS_SECRET');
+    const nodeEnv = configService.get<string>('NODE_ENV', 'development');
+
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: jwtSecret,
+      secretOrKey: accessSecret || 'insecure-dev-secret',
+      issuer: configService.get<string>('JWT_ISSUER') || 'auth-service',
+      audience: configService.get<string>('JWT_AUDIENCE') || 'api-clients',
     });
+
+    if (!accessSecret && nodeEnv === 'production') {
+      throw new Error('JWT_ACCESS_SECRET is required');
+    }
   }
 
   async validate(payload: JwtPayload) {
-    // This attaches the payload to the request object as `req.user`
     return {
       userId: payload.sub,
       email: payload.email,

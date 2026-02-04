@@ -163,6 +163,8 @@ services:
 
   analytics-service:
     build: ./analytics-service
+    ports:
+      - "8004:3005"
     env_file:
       - ./analytics-service/.env
     depends_on:

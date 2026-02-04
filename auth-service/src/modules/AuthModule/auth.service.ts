@@ -32,6 +32,8 @@ import { UserRole } from '../../entities/User-role.entity';
 import { CustomerGrowthDto } from '../Analytics/dto/customer-growth.dto';
 import { CustomerGrowthQueryDto, TrendPeriod } from '../Analytics/dto/customer-growth-query.dto';
 import * as dayjs from 'dayjs';
+import { HttpService } from '@nestjs/axios';
+import { firstValueFrom } from 'rxjs';
 
 @Injectable()
 export class AuthService {
@@ -57,6 +59,7 @@ export class AuthService {
     private readonly mailer: MailerProvider,
     private readonly kafka: KafkaProvider,
     private readonly rolesService: RolesService,
+    private readonly httpService: HttpService,
     
   ) {}
 
@@ -333,9 +336,18 @@ try {
     payloadForAccess.restaurant_id = restaurantId;
   }
 
-  // Access token (short-lived)
-  const accessExpiry = process.env.JWT_ACCESS_EXPIRES ?? '24h';
-  const accessToken = this.jwtService.sign(payloadForAccess, { expiresIn: accessExpiry });
+  const accessExpiry = process.env.JWT_ACCESS_EXPIRES ?? '15m';
+  const accessSecret = process.env.JWT_ACCESS_SECRET || 'insecure-dev-secret';
+  const refreshSecret = process.env.JWT_REFRESH_SECRET || accessSecret;
+  const issuer = process.env.JWT_ISSUER || 'auth-service';
+  const audience = process.env.JWT_AUDIENCE || 'api-clients';
+
+  const accessToken = this.jwtService.sign(payloadForAccess, {
+    expiresIn: accessExpiry,
+    secret: accessSecret,
+    issuer,
+    audience,
+  });
   const refreshDays = remember ? Number(process.env.JWT_REMEMBER_DAYS ?? 30) : Number(process.env.JWT_REFRESH_DAYS ?? 7);
   const refreshExpiry = `${refreshDays}d`;
   const expiresAt = new Date(Date.now() + refreshDays * 24 * 60 * 60 * 1000);
@@ -354,7 +366,12 @@ try {
     sub: user.user_id,
     tid: savedToken.id,
   };
-  const refreshTokenPlain = this.jwtService.sign(refreshPayload, { expiresIn: refreshExpiry });
+  const refreshTokenPlain = this.jwtService.sign(refreshPayload, {
+    expiresIn: refreshExpiry,
+    secret: refreshSecret,
+    issuer,
+    audience,
+  });
 
   // 4) hash and persist refresh token
   const hash = await bcrypt.hash(refreshTokenPlain, 10);
@@ -375,11 +392,238 @@ try {
 }
 
 
+async ssoLogin(token: string, provider: string, userAgent: string, ip: string) {
+  let profile: any;
+  if (provider === 'google') {
+    // Use unsafe verification if no client secret (for development)
+    if (!process.env.GOOGLE_CLIENT_SECRET) {
+      profile = await this.verifyGoogleTokenUnsafe(token);
+    } else {
+      profile = await this.verifyGoogleToken(token);
+    }
+  } else if (provider === 'facebook') {
+    // Use unsafe verification if no app secret (for development)
+    if (!process.env.FACEBOOK_APP_SECRET) {
+      profile = await this.verifyFacebookTokenUnsafe(token);
+    } else {
+      profile = await this.verifyFacebookToken(token);
+    }
+  } else {
+    throw new BadRequestException('Unsupported provider');
+  }
+
+  // Find existing user by email or provider_id
+  let user = await this.userRepo.findOne({
+    where: [
+      { email: profile.email },
+      { provider: provider, provider_id: profile.id },
+    ],
+    relations: ['roles'],
+  });
+
+  if (!user) {
+    // Create new user
+    user = this.userRepo.create({
+      email: profile.email,
+      username: profile.email.split('@')[0], // or generate unique
+      password_hash: '', // no password for SSO
+      is_verified: true, // assume verified from provider
+      provider: provider,
+      provider_id: profile.id,
+      profile_picture: profile.picture,
+    });
+    user = await this.userRepo.save(user);
+
+    // Assign default role 'customer'
+    const customerRole = await this.roleRepo.findOne({ where: { name: 'customer' } });
+    if (customerRole) {
+      const userRole = this.userRoleRepo.create({
+        user,
+        role: customerRole,
+      });
+      await this.userRoleRepo.save(userRole);
+      user.roles = [userRole];
+    }
+  } else {
+    // Update provider info if not set
+    if (!user.provider) {
+      user.provider = provider;
+      user.provider_id = profile.id;
+      user.profile_picture = profile.picture;
+      await this.userRepo.save(user);
+    }
+  }
+
+  // Now login
+  return this.login(user, userAgent, ip, false);
+}
+
+async verifyGoogleToken(token: string) {
+  try {
+    const response = await firstValueFrom(
+      this.httpService.get(`https://oauth2.googleapis.com/tokeninfo?id_token=${token}`)
+    );
+    const data = response.data;
+    return {
+      id: data.sub,
+      email: data.email,
+      name: data.name,
+      picture: data.picture,
+    };
+  } catch (error) {
+    throw new UnauthorizedException('Invalid Google token');
+  }
+}
+
+async verifyGoogleTokenUnsafe(token: string) {
+  // ⚠️  INSECURE: Only decode JWT without verification
+  // Use only for development/testing - never in production!
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) throw new Error('Invalid JWT');
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+    return {
+      id: payload.sub,
+      email: payload.email,
+      name: payload.name,
+      picture: payload.picture,
+    };
+  } catch (error) {
+    throw new UnauthorizedException('Invalid Google token');
+  }
+}
+
+async verifyFacebookToken(token: string) {
+  try {
+    // First get app token or use debug_token
+    const appId = process.env.FACEBOOK_APP_ID;
+    const appSecret = process.env.FACEBOOK_APP_SECRET;
+    const appTokenResponse = await firstValueFrom(
+      this.httpService.get(`https://graph.facebook.com/oauth/access_token?client_id=${appId}&client_secret=${appSecret}&grant_type=client_credentials`)
+    );
+    const appToken = appTokenResponse.data.access_token;
+
+    const debugResponse = await firstValueFrom(
+      this.httpService.get(`https://graph.facebook.com/debug_token?input_token=${token}&access_token=${appToken}`)
+    );
+    if (!debugResponse.data.data.is_valid) {
+      throw new UnauthorizedException('Invalid Facebook token');
+    }
+
+    const userResponse = await firstValueFrom(
+      this.httpService.get(`https://graph.facebook.com/me?fields=id,email,name,picture&access_token=${token}`)
+    );
+    const data = userResponse.data;
+    return {
+      id: data.id,
+      email: data.email,
+      name: data.name,
+      picture: data.picture?.data?.url,
+    };
+  } catch (error) {
+    throw new UnauthorizedException('Invalid Facebook token');
+  }
+}
+
+async verifyFacebookTokenUnsafe(token: string) {
+  // ⚠️  INSECURE: Decode JWT without verification
+  // Use only for development/testing - never in production!
+  try {
+    const response = await firstValueFrom(
+      this.httpService.get(`https://graph.facebook.com/me?fields=id,email,name,picture&access_token=${token}`)
+    );
+    const data = response.data;
+    return {
+      id: data.id,
+      email: data.email,
+      name: data.name,
+      picture: data.picture?.data?.url,
+    };
+  } catch (error) {
+    throw new UnauthorizedException('Invalid Facebook token');
+  }
+}
+
+async ssoLoginFromPassport(passportUser: any, provider: string, userAgent: string, ip: string) {
+  // passportUser is the profile from strategy
+  const profile = {
+    id: passportUser.providerId,
+    email: passportUser.email,
+    name: `${passportUser.firstName} ${passportUser.lastName}`,
+    picture: passportUser.picture,
+  };
+
+  // Find or create user
+  let user = await this.userRepo.findOne({
+    where: [
+      { email: profile.email },
+      { provider: provider, provider_id: profile.id },
+    ],
+    relations: ['roles'],
+  });
+
+  if (!user) {
+    user = this.userRepo.create({
+      email: profile.email,
+      username: profile.email.split('@')[0],
+      password_hash: '',
+      is_verified: true,
+      provider: provider,
+      provider_id: profile.id,
+      profile_picture: profile.picture,
+    });
+    user = await this.userRepo.save(user);
+
+    // Assign customer role
+    const customerRole = await this.roleRepo.findOne({ where: { name: 'customer' } });
+    if (customerRole) {
+      const userRole = this.userRoleRepo.create({
+        user,
+        role: customerRole,
+      });
+      await this.userRoleRepo.save(userRole);
+      user.roles = [userRole];
+    }
+  } else {
+    if (!user.provider) {
+      user.provider = provider;
+      user.provider_id = profile.id;
+      user.profile_picture = profile.picture;
+      await this.userRepo.save(user);
+    }
+  }
+
+  return this.login(user, userAgent, ip, false);
+}
+
+async getUserById(userId: string) {
+  const user = await this.userRepo.findOne({
+    where: { user_id: userId },
+    relations: ['roles'],
+  });
+  if (!user) throw new NotFoundException('User not found');
+  return {
+    user_id: user.user_id,
+    email: user.email,
+    username: user.username,
+    phone: user.phone,
+    is_verified: user.is_verified,
+    roles: user.roles?.map(ur => ur.role?.name).filter(Boolean),
+  };
+}
 async refresh(dto: RefreshTokenDto) {
   const presented = dto.refreshToken;
   let payload: any;
+  const accessSecret = process.env.JWT_ACCESS_SECRET || 'insecure-dev-secret';
+  const refreshSecret = process.env.JWT_REFRESH_SECRET || accessSecret;
+  const issuer = process.env.JWT_ISSUER || 'auth-service';
+  const audience = process.env.JWT_AUDIENCE || 'api-clients';
   try {
-    payload = this.jwtService.verify(presented, { secret: process.env.JWT_SECRET });
+    payload = this.jwtService.verify(presented, {
+      secret: refreshSecret,
+      issuer,
+      audience,
+    });
   } catch (err) {
     throw new UnauthorizedException('Invalid or expired refresh token');
   }
@@ -439,7 +683,12 @@ async refresh(dto: RefreshTokenDto) {
     sub: stored.user.user_id,
     tid: savedNew.id,
   };
-  const newRefreshPlain = this.jwtService.sign(newRefreshPayload, { expiresIn: Math.ceil(originalLifetimeMs / 1000) + 's' });
+  const newRefreshPlain = this.jwtService.sign(newRefreshPayload, {
+    expiresIn: Math.ceil(originalLifetimeMs / 1000) + 's',
+    secret: refreshSecret,
+    issuer,
+    audience,
+  });
 
   savedNew.token_hash = await bcrypt.hash(newRefreshPlain, 10);
   await this.tokenRepo.save(savedNew);
@@ -459,7 +708,12 @@ async refresh(dto: RefreshTokenDto) {
     email: stored.user.email,
     roles: Array.from(new Set(roles)),
     permissions: Array.from(new Set(permissions)),
-  }, { expiresIn: process.env.JWT_ACCESS_EXPIRES ?? '15m' });
+  }, {
+    expiresIn: process.env.JWT_ACCESS_EXPIRES ?? '15m',
+    secret: accessSecret,
+    issuer,
+    audience,
+  });
 
   return {
     accessToken,

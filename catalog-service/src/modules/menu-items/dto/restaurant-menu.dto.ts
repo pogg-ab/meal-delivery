@@ -7,6 +7,9 @@ class MenuItemInfo {
   @ApiProperty({ example: 'Doro Wet' })
   name: string;
 
+  @ApiProperty({ example: 'A spicy traditional chicken stew.', required: false })
+  description?: string;
+
   @ApiProperty({ example: '250.00' })
   price: string; // Your entity uses a string for price, so we'll match that
   
@@ -18,6 +21,9 @@ class MenuItemInfo {
 
   @ApiProperty({ example: 127, required: false })
   total_reviews?: number;
+
+  @ApiProperty({ example: 'https://res.cloudinary.com/demo/image/upload/v123/menu-item.jpg', required: false })
+  image_url?: string;
 
   // --- CHANGES START HERE ---
   @ApiProperty({ example: 'a1b2c3d4-e5f6-7890-1234-567890abcdef' })

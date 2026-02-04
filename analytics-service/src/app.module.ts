@@ -32,5 +32,3 @@ import { PlanFeatureModule } from './modules/plan-feature/plan-feature.module';
   providers: [AppService],
 })
 export class AppModule {}
-
-

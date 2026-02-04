@@ -24,6 +24,7 @@ import { RewardsModule } from './modules/rewards/rewards.module';
 import { ReviewsModule } from './modules/reviews/reviews.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { SchedulerModule } from './modules/scheduler/scheduler.module';
+import { UploadsModule } from './modules/uploads/uploads.module';
 
 @Module({
   imports: [
@@ -97,6 +98,7 @@ import { SchedulerModule } from './modules/scheduler/scheduler.module';
      ReviewsModule,
      AnalyticsModule,
      SchedulerModule,
+      UploadsModule,
   ],
   providers: [KafkaProvider],
   exports: [KafkaProvider],

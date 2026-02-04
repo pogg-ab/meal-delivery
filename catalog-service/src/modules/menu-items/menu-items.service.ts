@@ -75,6 +75,7 @@ export class MenuItemsService {
       'menuItem.id',
       'menuItem.name',
       'menuItem.description', // <-- 1. Select the description
+      'menuItem.image_url',
       'menuItem.price',
       'menuItem.is_available',
       'menuItem.average_rating',
@@ -88,6 +89,7 @@ export class MenuItemsService {
     id: item.id,
     name: item.name,
     description: item.description, // <-- 2. Map the description
+    image_url: item.image_url,
     price: item.price.toString(),
     is_available: item.is_available,
     average_rating: item.average_rating,

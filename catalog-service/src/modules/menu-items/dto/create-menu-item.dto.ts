@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsString, IsUUID, IsOptional, IsNumber, IsPositive, IsBoolean } from 'class-validator';
+import { IsNotEmpty, IsString, IsUUID, IsOptional, IsNumber, IsPositive, IsUrl } from 'class-validator';
 
 export class CreateMenuItemDto {
   @ApiProperty({ description: 'The ID of the category this item belongs to' })
@@ -21,6 +21,11 @@ export class CreateMenuItemDto {
   @IsNumber()
   @IsPositive()
   price: number;
+
+  @ApiProperty({ example: 'https://res.cloudinary.com/demo/image/upload/v123/menu-item.jpg', required: false })
+  @IsOptional()
+  @IsUrl()
+  image_url?: string;
 
 
 }

@@ -7,6 +7,7 @@ import { ConfigService } from '@nestjs/config';
 import { MicroserviceOptions } from '@nestjs/microservices';
 import { kafkaConfig } from './kafka.config';
 import * as bodyParser from 'body-parser';
+import { SanitizeInputPipe } from './common/pipes/sanitize-input.pipe';
 
 // Polyfill global crypto if needed
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -80,7 +81,10 @@ async function bootstrap() {
   const PORT = configService.get<number>('PORT', 3008);
 
   app.enableCors();
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  app.useGlobalPipes(
+    new SanitizeInputPipe(),
+    new ValidationPipe({ whitelist: true, transform: true }),
+  );
 
   // Always enable Swagger
   setupSwagger(app);

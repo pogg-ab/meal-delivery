@@ -48,6 +48,14 @@ export class User {
   @Column({ type: 'timestamp', nullable: true })
   verified_at?: Date;
 
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  provider?: string; // 'google' or 'facebook'
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  provider_id?: string;
+
+  @Column({ type: 'text', nullable: true })
+  profile_picture?: string;
   @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   created_at: Date;
 

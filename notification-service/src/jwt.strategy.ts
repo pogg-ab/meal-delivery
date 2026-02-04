@@ -5,15 +5,24 @@ import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-  constructor(configService: ConfigService) {
+  constructor(private readonly configService: ConfigService) {
+    const accessSecret = configService.get<string>('JWT_ACCESS_SECRET');
+    const nodeEnv = configService.get<string>('NODE_ENV', 'development');
+
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: configService.get('JWT_SECRET'),
+      secretOrKey: accessSecret || 'insecure-dev-secret',
+      issuer: configService.get<string>('JWT_ISSUER') || 'auth-service',
+      audience: configService.get<string>('JWT_AUDIENCE') || 'api-clients',
     });
+
+    if (!accessSecret && nodeEnv === 'production') {
+      throw new Error('JWT_ACCESS_SECRET is required');
+    }
   }
 
   async validate(payload: any) {
-    return payload; // user info and roles are in the payload
+    return payload;
   }
-} 
+}
